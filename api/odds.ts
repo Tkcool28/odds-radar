@@ -1,10 +1,18 @@
 export default async function handler(req: Request): Promise<Response> {
-  const startedAt = Date.now();
-
   try {
     const url = new URL(req.url);
+    const mode = url.searchParams.get('mode') || 'debug';
     const env = (globalThis as any).process?.env ?? {};
     const apiKey = env.THE_ODDS_API_KEY;
+
+    if (mode === 'debug') {
+      return json({
+        ok: true,
+        mode: 'debug',
+        hasApiKey: Boolean(apiKey),
+        message: 'Function is running.',
+      });
+    }
 
     if (!apiKey) {
       return json(
@@ -16,56 +24,44 @@ export default async function handler(req: Request): Promise<Response> {
       );
     }
 
-    const sport = url.searchParams.get('sport') || 'basketball_nba';
+    if (mode === 'sports') {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 5000);
 
-    const upstream = new URL(`https://api.the-odds-api.com/v4/sports/${sport}/odds`);
-    upstream.searchParams.set('apiKey', apiKey);
-    upstream.searchParams.set('regions', 'us');
-    upstream.searchParams.set('markets', 'h2h,spreads,totals');
-    upstream.searchParams.set('oddsFormat', 'american');
-    upstream.searchParams.set('dateFormat', 'iso');
-    upstream.searchParams.set('bookmakers', 'pinnacle,fanduel,draftkings');
+      try {
+        const res = await fetch(
+          `https://api.the-odds-api.com/v4/sports/?apiKey=${encodeURIComponent(apiKey)}`,
+          {
+            method: 'GET',
+            headers: { accept: 'application/json' },
+            signal: controller.signal,
+            cache: 'no-store',
+          }
+        );
 
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 8000);
+        const text = await res.text();
 
-    let res: Response;
-    try {
-      res = await fetch(upstream.toString(), {
-        method: 'GET',
-        headers: {
-          accept: 'application/json',
-        },
-        signal: controller.signal,
-        cache: 'no-store',
-      });
-    } finally {
-      clearTimeout(timeout);
+        return new Response(text, {
+          status: res.status,
+          headers: {
+            'content-type': 'application/json; charset=utf-8',
+            'cache-control': 'no-store',
+          },
+        });
+      } finally {
+        clearTimeout(timeout);
+      }
     }
 
-    const text = await res.text();
-
-    return new Response(text, {
-      status: res.status,
-      headers: {
-        'content-type': 'application/json; charset=utf-8',
-        'cache-control': 'no-store',
-        'x-debug-upstream-status': String(res.status),
-        'x-debug-duration-ms': String(Date.now() - startedAt),
-      },
-    });
+    return json({
+      ok: false,
+      error: 'Unknown mode. Use ?mode=debug or ?mode=sports',
+    }, 400);
   } catch (error) {
-    const message =
-      error instanceof Error ? error.message : 'Unknown server error';
-
     return json(
       {
         ok: false,
-        error: message,
-        timedOut:
-          message.toLowerCase().includes('abort') ||
-          message.toLowerCase().includes('timeout'),
-        durationMs: Date.now() - startedAt,
+        error: error instanceof Error ? error.message : 'Unknown server error',
       },
       500
     );
@@ -80,4 +76,4 @@ function json(data: unknown, status = 200): Response {
       'cache-control': 'no-store',
     },
   });
-}
+          }
