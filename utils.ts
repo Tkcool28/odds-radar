@@ -1,72 +1,56 @@
-import type { Book, EventItem, MarketKey, OddsFormat, Outcome } from './types';
+export type OddsFormat = 'american' | 'decimal';
 
-export const BOOK_ORDER = ['pinnacle', 'fanduel', 'draftkings'] as const;
-
-export function formatOdds(price: number, format: OddsFormat): string {
-  if (format === 'american') {
-    return price > 0 ? `+${price}` : `${price}`;
+export function americanToDecimal(american: number): number {
+  if (american > 0) {
+    return 1 + american / 100;
   }
-  if (price > 0) {
-    return (1 + price / 100).toFixed(2);
-  }
-  return (1 + 100 / Math.abs(price)).toFixed(2);
+  return 1 + 100 / Math.abs(american);
 }
 
-export function getMarket(book: Book, marketKey: MarketKey) {
-  return book.markets.find((market) => market.key === marketKey);
+export function decimalToAmerican(decimal: number): number {
+  if (decimal >= 2) {
+    return Math.round((decimal - 1) * 100);
+  }
+  return Math.round(-100 / (decimal - 1));
 }
 
-export function outcomeLabel(outcome: Outcome, marketKey: MarketKey): string {
-  if (marketKey === 'h2h') return outcome.name;
-  const point = typeof outcome.point === 'number' ? ` ${outcome.point > 0 ? '+' : ''}${outcome.point}` : '';
-  return `${outcome.name}${point}`;
+export function formatOdds(value: number, format: OddsFormat): string {
+  if (!Number.isFinite(value)) return '—';
+
+  if (format === 'decimal') {
+    const decimal = value > 0 || value < 0 ? americanToDecimal(value) : value;
+    return decimal.toFixed(2);
+  }
+
+  if (value > 0) return `+${Math.round(value)}`;
+  return `${Math.round(value)}`;
 }
 
 function normalizedComparatorValue(price: number, point?: number): number {
-  return point ?? Number.NaN || 0;
+  if (typeof point === 'number' && Number.isFinite(point)) {
+    return point;
+  }
+  return 0;
 }
 
-function sameOutcome(a: Outcome, b: Outcome, marketKey: MarketKey): boolean {
-  if (a.name !== b.name) return false;
-  if (marketKey === 'h2h') return true;
-  return normalizedComparatorValue(a.price, a.point) === normalizedComparatorValue(b.price, b.point);
+export function isBetterMoneyline(candidatePrice: number, currentBestPrice?: number): boolean {
+  if (currentBestPrice === undefined) return true;
+  return candidatePrice > currentBestPrice;
 }
 
-export function isBetterPrice(candidate: Outcome, incumbent: Outcome): boolean {
-  return candidate.price > incumbent.price;
-}
+export function isBetterSpreadOrTotal(
+  candidatePoint: number | undefined,
+  candidatePrice: number,
+  bestPoint: number | undefined,
+  bestPrice: number | undefined
+): boolean {
+  const candidateValue = normalizedComparatorValue(candidatePrice, candidatePoint);
+  const bestValue = normalizedComparatorValue(bestPrice ?? 0, bestPoint);
 
-export function bestOutcomeByLabel(event: EventItem, marketKey: MarketKey) {
-  const bestMap = new Map<string, { bookKey: string; outcome: Outcome }>();
-
-  for (const book of event.books) {
-    const market = getMarket(book, marketKey);
-    if (!market) continue;
-    for (const outcome of market.outcomes) {
-      const label = outcomeLabel(outcome, marketKey);
-      const current = bestMap.get(label);
-      if (!current || isBetterPrice(outcome, current.outcome)) {
-        bestMap.set(label, { bookKey: book.key, outcome });
-      }
-    }
+  if (candidateValue !== bestValue) {
+    return candidateValue > bestValue;
   }
 
-  return bestMap;
-}
-
-export function teamScore(event: EventItem, teamName: string): string | null {
-  return event.scores?.find((item) => item.name === teamName)?.score ?? null;
-}
-
-export function eventStatus(event: EventItem): string {
-  if (event.completed) return 'Final';
-  if (event.isLive) return 'Live';
-  return 'Upcoming';
-}
-
-export function relativeUpdated(iso?: string): string {
-  if (!iso) return '—';
-  const diff = Math.max(0, Math.floor((Date.now() - new Date(iso).getTime()) / 1000));
-  if (diff < 60) return `${diff}s ago`;
-  return `${Math.floor(diff / 60)}m ago`;
+  if (bestPrice === undefined) return true;
+  return candidatePrice > bestPrice;
 }
