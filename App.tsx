@@ -1,9 +1,10 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 
 type MarketTab = 'moneyline' | 'spread' | 'total';
 type SportKey = 'basketball_nba' | 'icehockey_nhl';
 type BookKey = 'Pinnacle' | 'FanDuel' | 'DraftKings';
 type EdgeType = 'price' | 'point' | 'both' | null;
+type ToolTab = 'odds' | 'hedge';
 
 type Outcome = {
   name: string;
@@ -56,12 +57,12 @@ function toBookKey(book: Bookmaker): BookKey | null {
 }
 
 function formatOdds(value?: number) {
-  if (typeof value !== 'number') return '—';
+  if (typeof value !== 'number' || Number.isNaN(value)) return '—';
   return value > 0 ? `+${value}` : `${value}`;
 }
 
 function formatPoint(value?: number) {
-  if (typeof value !== 'number') return '—';
+  if (typeof value !== 'number' || Number.isNaN(value)) return '—';
   return value > 0 ? `+${value}` : `${value}`;
 }
 
@@ -88,13 +89,29 @@ function getBestPrice(values: Partial<Record<BookKey, number>>): BookKey[] {
 }
 
 function americanToImpliedPct(odds?: number): number {
-  if (typeof odds !== 'number') return 0;
+  if (typeof odds !== 'number' || odds === 0) return 0;
 
   if (odds > 0) {
     return (100 / (odds + 100)) * 100;
   }
 
   return ((-odds) / ((-odds) + 100)) * 100;
+}
+
+function americanProfit(stake: number, odds: number): number {
+  if (!Number.isFinite(stake) || !Number.isFinite(odds) || stake <= 0 || odds === 0) {
+    return 0;
+  }
+
+  if (odds > 0) {
+    return stake * (odds / 100);
+  }
+
+  return stake * (100 / Math.abs(odds));
+}
+
+function americanReturn(stake: number, odds: number): number {
+  return stake + americanProfit(stake, odds);
 }
 
 function priceEdgePct(pinPrice?: number, otherPrice?: number): number {
@@ -229,6 +246,11 @@ function edgeBoxStyle(edge: EdgeType): React.CSSProperties {
   };
 }
 
+function parseNumberInput(value: string): number {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : 0;
+}
+
 export default function App() {
   const [sport, setSport] = useState<SportKey>('basketball_nba');
   const [market, setMarket] = useState<MarketTab>('moneyline');
@@ -236,6 +258,16 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [updated, setUpdated] = useState('');
+
+  const [toolTab, setToolTab] = useState<ToolTab>('odds');
+
+  const [calcOdds, setCalcOdds] = useState('');
+  const [calcStake, setCalcStake] = useState('');
+
+  const [hedgeOrigStake, setHedgeOrigStake] = useState('');
+  const [hedgeOrigOdds, setHedgeOrigOdds] = useState('');
+  const [hedgeHedgeStake, setHedgeHedgeStake] = useState('');
+  const [hedgeHedgeOdds, setHedgeHedgeOdds] = useState('');
 
   async function loadGames() {
     try {
@@ -266,6 +298,54 @@ export default function App() {
   useEffect(() => {
     loadGames();
   }, [sport]);
+
+  const oddsCalc = useMemo(() => {
+    const stake = parseNumberInput(calcStake);
+    const odds = parseNumberInput(calcOdds);
+
+    const profit = americanProfit(stake, odds);
+    const totalReturn = americanReturn(stake, odds);
+    const implied = americanToImpliedPct(odds);
+
+    return { stake, odds, profit, totalReturn, implied };
+  }, [calcStake, calcOdds]);
+
+  const hedgeCalc = useMemo(() => {
+    const origStake = parseNumberInput(hedgeOrigStake);
+    const origOdds = parseNumberInput(hedgeOrigOdds);
+    const hedgeStake = parseNumberInput(hedgeHedgeStake);
+    const hedgeOdds = parseNumberInput(hedgeHedgeOdds);
+
+    const origProfit = americanProfit(origStake, origOdds);
+    const hedgeProfit = americanProfit(hedgeStake, hedgeOdds);
+
+    const totalRisk = origStake + hedgeStake;
+
+    const netIfOriginalWins = origProfit - hedgeStake;
+    const netIfHedgeWins = hedgeProfit - origStake;
+
+    let breakEvenHedgeStake = 0;
+    if (Number.isFinite(origStake) && Number.isFinite(origOdds) && Number.isFinite(hedgeOdds)) {
+      const originalWinNet = americanProfit(origStake, origOdds);
+      const hedgeDecimalProfitPerDollar =
+        hedgeOdds > 0 ? hedgeOdds / 100 : 100 / Math.abs(hedgeOdds);
+
+      if (hedgeDecimalProfitPerDollar > 0) {
+        breakEvenHedgeStake = (origStake + originalWinNet) / (1 + hedgeDecimalProfitPerDollar);
+      }
+    }
+
+    return {
+      origStake,
+      origOdds,
+      hedgeStake,
+      hedgeOdds,
+      totalRisk,
+      netIfOriginalWins,
+      netIfHedgeWins,
+      breakEvenHedgeStake,
+    };
+  }, [hedgeOrigStake, hedgeOrigOdds, hedgeHedgeStake, hedgeHedgeOdds]);
 
   return (
     <div
@@ -534,247 +614,34 @@ export default function App() {
               </div>
             );
           })}
-      </div>
-    </div>
-  );
-}
 
-function buildMoneylineRows(game: RawGame): RowData[] {
-  const rows: RowData[] = [];
-  const labels = [game.away_team, game.home_team];
+        <div
+          style={{
+            background: 'rgba(15, 23, 42, 0.92)',
+            border: '1px solid #1f2937',
+            borderRadius: 20,
+            overflow: 'hidden',
+          }}
+        >
+          <div style={{ padding: 16, borderBottom: '1px solid #182235' }}>
+            <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: '0.06em', color: '#38bdf8' }}>
+              TOOLS
+            </div>
+            <div style={{ fontSize: 28, fontWeight: 800, marginTop: 4 }}>
+              Betting Calculators
+            </div>
+            <div style={{ marginTop: 8, color: '#94a3b8' }}>
+              Local math only. No extra API requests.
+            </div>
+          </div>
 
-  for (const label of labels) {
-    const prices: Partial<Record<BookKey, number>> = {};
-    const points: Partial<Record<BookKey, string>> = {};
-    const pointNums: Partial<Record<BookKey, number>> = {};
-
-    for (const bookmaker of game.bookmakers || []) {
-      const book = toBookKey(bookmaker);
-      if (!book) continue;
-
-      const market = bookmaker.markets?.find((m) => m.key === 'h2h');
-      const outcome = market?.outcomes?.find((o) => o.name === label);
-
-      if (outcome) {
-        prices[book] = outcome.price;
-      }
-    }
-
-    rows.push({
-      label,
-      displayPoint: '',
-      prices,
-      points,
-      pointNums,
-    });
-  }
-
-  return rows;
-}
-
-function buildSpreadRows(game: RawGame): RowData[] {
-  const rows: RowData[] = [];
-  const labels = [game.away_team, game.home_team];
-
-  for (const label of labels) {
-    const prices: Partial<Record<BookKey, number>> = {};
-    const points: Partial<Record<BookKey, string>> = {};
-    const pointNums: Partial<Record<BookKey, number>> = {};
-    let displayPoint = '—';
-
-    for (const bookmaker of game.bookmakers || []) {
-      const book = toBookKey(bookmaker);
-      if (!book) continue;
-
-      const market = bookmaker.markets?.find((m) => m.key === 'spreads');
-      const outcome = market?.outcomes?.find((o) => o.name === label);
-
-      if (outcome) {
-        prices[book] = outcome.price;
-        points[book] = formatPoint(outcome.point);
-        if (typeof outcome.point === 'number') {
-          pointNums[book] = outcome.point;
-        }
-        if (displayPoint === '—') displayPoint = formatPoint(outcome.point);
-      }
-    }
-
-    rows.push({
-      label,
-      displayPoint,
-      prices,
-      points,
-      pointNums,
-    });
-  }
-
-  return rows;
-}
-
-function buildTotalRows(game: RawGame): RowData[] {
-  const rows: RowData[] = [];
-  const labels = ['Over', 'Under'];
-
-  for (const label of labels) {
-    const prices: Partial<Record<BookKey, number>> = {};
-    const points: Partial<Record<BookKey, string>> = {};
-    const pointNums: Partial<Record<BookKey, number>> = {};
-    let displayPoint = '—';
-
-    for (const bookmaker of game.bookmakers || []) {
-      const book = toBookKey(bookmaker);
-      if (!book) continue;
-
-      const market = bookmaker.markets?.find((m) => m.key === 'totals');
-      const outcome = market?.outcomes?.find((o) => o.name === label);
-
-      if (outcome) {
-        prices[book] = outcome.price;
-        points[book] = typeof outcome.point === 'number' ? `${outcome.point}` : '—';
-        if (typeof outcome.point === 'number') {
-          pointNums[book] = outcome.point;
-          if (displayPoint === '—') {
-            displayPoint = `${outcome.point}`;
-          }
-        }
-      }
-    }
-
-    rows.push({
-      label,
-      displayPoint,
-      prices,
-      points,
-      pointNums,
-    });
-  }
-
-  return rows;
-}
-
-function Box({ children }: { children: React.ReactNode }) {
-  return (
-    <div
-      style={{
-        background: 'rgba(15, 23, 42, 0.92)',
-        border: '1px solid #1f2937',
-        borderRadius: 20,
-        padding: 20,
-        color: '#cbd5e1',
-      }}
-    >
-      {children}
-    </div>
-  );
-}
-
-function LegendBox({
-  title,
-  text,
-  edge,
-}: {
-  title: string;
-  text: string;
-  edge: EdgeType;
-}) {
-  return (
-    <div
-      style={{
-        borderRadius: 12,
-        padding: '8px 10px',
-        minHeight: 0,
-        ...edgeBoxStyle(edge),
-      }}
-    >
-      <div
-        style={{
-          fontSize: 10,
-          fontWeight: 900,
-          letterSpacing: '0.05em',
-          lineHeight: 1.1,
-        }}
-      >
-        {title}
-      </div>
-      <div
-        style={{
-          fontSize: 11,
-          marginTop: 4,
-          lineHeight: 1.25,
-        }}
-      >
-        {text}
-      </div>
-    </div>
-  );
-}
-
-function CellHeader({ children }: { children: React.ReactNode }) {
-  return (
-    <div
-      style={{
-        padding: '12px 10px',
-        textAlign: 'center',
-        borderBottom: '1px solid #182235',
-        color: '#94a3b8',
-        fontSize: 12,
-        fontWeight: 700,
-        textTransform: 'uppercase',
-      }}
-    >
-      {children}
-    </div>
-  );
-}
-
-const pillStyle: React.CSSProperties = {
-  display: 'inline-block',
-  padding: '6px 10px',
-  borderRadius: 999,
-  border: '1px solid #243041',
-  background: '#111827',
-  color: '#cbd5e1',
-  fontSize: 12,
-  fontWeight: 700,
-};
-
-const refreshButtonStyle: React.CSSProperties = {
-  padding: '6px 12px',
-  borderRadius: 999,
-  border: '1px solid #22c55e',
-  background: 'rgba(34, 197, 94, 0.12)',
-  color: '#dcfce7',
-  fontSize: 12,
-  fontWeight: 700,
-  cursor: 'pointer',
-};
-
-function buttonStyle(active: boolean, color: string): React.CSSProperties {
-  return {
-    border: active ? `1px solid ${color}` : '1px solid #243041',
-    background: active ? `${color}22` : '#111827',
-    color: active ? '#ffffff' : '#cbd5e1',
-    padding: '10px 14px',
-    borderRadius: 12,
-    fontSize: 14,
-    fontWeight: 700,
-    cursor: 'pointer',
-  };
-}
-
-function leftCellStyle(last: boolean): React.CSSProperties {
-  return {
-    padding: 14,
-    borderBottom: last ? 'none' : '1px solid #182235',
-  };
-}
-
-function valueCellStyle(last: boolean, best: boolean): React.CSSProperties {
-  return {
-    padding: '14px 10px',
-    textAlign: 'center',
-    borderBottom: last ? 'none' : '1px solid #182235',
-    background: best ? 'rgba(34, 197, 94, 0.10)' : 'transparent',
-    color: best ? '#dcfce7' : '#e5e7eb',
-  };
-}
+          <div style={{ padding: 16 }}>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 16 }}>
+              <button
+                onClick={() => setToolTab('odds')}
+                style={buttonStyle(toolTab === 'odds', '#22c55e')}
+              >
+                Odds Calculator
+              </button>
+              <button
+                onClick=
