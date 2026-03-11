@@ -700,5 +700,44 @@ const pillStyle: React.CSSProperties = {
   fontSize: 12,
   fontWeight: 700,
 };
+const refreshButtonStyle: React.CSSProperties = {
+  padding: '6px 12px',
+  borderRadius: 999,
+  border: '1px solid #22c55e',
+  background: 'rgba(34, 197, 94, 0.12)',
+  color: '#dcfce7',
+  fontSize: 12,
+  fontWeight: 700,
+  cursor: 'pointer',
+};
 
-const refresh
+function buttonStyle(active: boolean, color: string): React.CSSProperties {
+  return {
+    border: active ? `1px solid ${color}` : '1px solid #243041',
+    background: active ? `${color}22` : '#111827',
+    color: active ? '#ffffff' : '#cbd5e1',
+    padding: '10px 14px',
+    borderRadius: 12,
+    fontSize: 14,
+    fontWeight: 700,
+    cursor: 'pointer',
+  };
+}
+
+function leftCellStyle(last: boolean): React.CSSProperties {
+  return {
+    padding: 14,
+    borderBottom: last ? 'none' : '1px solid #182235',
+  };
+}
+
+function valueCellStyle(last: boolean, best: boolean): React.CSSProperties {
+  return {
+    padding: '14px 10px',
+    textAlign: 'center',
+    borderBottom: last ? 'none' : '1px solid #182235',
+    background: best ? 'rgba(34, 197, 94, 0.10)' : 'transparent',
+    color: best ? '#dcfce7' : '#e5e7eb',
+  };
+}
+
