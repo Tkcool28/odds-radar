@@ -3,6 +3,7 @@ import React, { useEffect, useState } from 'react';
 type MarketTab = 'moneyline' | 'spread' | 'total';
 type SportKey = 'basketball_nba' | 'icehockey_nhl';
 type BookKey = 'Pinnacle' | 'FanDuel' | 'DraftKings';
+type EdgeType = 'price' | 'point' | 'both' | null;
 
 type Outcome = {
   name: string;
@@ -28,6 +29,20 @@ type RawGame = {
   home_team: string;
   away_team: string;
   bookmakers?: Bookmaker[];
+};
+
+type RowData = {
+  label: string;
+  displayPoint: string;
+  prices: Partial<Record<BookKey, number>>;
+  points: Partial<Record<BookKey, string>>;
+  pointNums: Partial<Record<BookKey, number>>;
+};
+
+type EdgeInfo = {
+  type: EdgeType;
+  pct: number;
+  reason: string;
 };
 
 const BOOKS: BookKey[] = ['Pinnacle', 'FanDuel', 'DraftKings'];
@@ -68,6 +83,152 @@ function getBestPrice(values: Partial<Record<BookKey, number>>): BookKey[] {
   if (nums.length === 0) return [];
   const best = Math.max(...nums);
   return BOOKS.filter((b) => values[b] === best);
+}
+
+function americanToImpliedPct(odds?: number): number {
+  if (typeof odds !== 'number') return 0;
+
+  if (odds > 0) {
+    return (100 / (odds + 100)) * 100;
+  }
+
+  return ((-odds) / ((-odds) + 100)) * 100;
+}
+
+function priceEdgePct(pinPrice?: number, otherPrice?: number): number {
+  if (typeof pinPrice !== 'number' || typeof otherPrice !== 'number') return 0;
+
+  const pinImp = americanToImpliedPct(pinPrice);
+  const otherImp = americanToImpliedPct(otherPrice);
+
+  return Math.max(0, pinImp - otherImp);
+}
+
+function pointEdgePct(
+  market: MarketTab,
+  label: string,
+  pinPoint?: number,
+  otherPoint?: number
+): number {
+  if (typeof pinPoint !== 'number' || typeof otherPoint !== 'number') return 0;
+
+  let delta = 0;
+
+  if (market === 'spread') {
+    // Bigger number is always better for the bettor:
+    // +5.5 better than +4.5, -3.5 better than -4.5
+    delta = otherPoint - pinPoint;
+    return Math.max(0, delta * 2.0);
+  }
+
+  if (market === 'total') {
+    if (label === 'Over') {
+      // Lower total is better for Over
+      delta = pinPoint - otherPoint;
+    } else {
+      // Higher total is better for Under
+      delta = otherPoint - pinPoint;
+    }
+
+    return Math.max(0, delta * 1.5);
+  }
+
+  return 0;
+}
+
+function getEdgeInfo(
+  market: MarketTab,
+  row: RowData,
+  book: BookKey
+): EdgeInfo {
+  if (book === 'Pinnacle') {
+    return { type: null, pct: 0, reason: '' };
+  }
+
+  const pinPrice = row.prices.Pinnacle;
+  const otherPrice = row.prices[book];
+  const pinPoint = row.pointNums.Pinnacle;
+  const otherPoint = row.pointNums[book];
+
+  if (market === 'moneyline') {
+    const pEdge = priceEdgePct(pinPrice, otherPrice);
+
+    if (pEdge > 0) {
+      return {
+        type: 'price',
+        pct: pEdge,
+        reason: 'price',
+      };
+    }
+
+    return { type: null, pct: 0, reason: '' };
+  }
+
+  const samePoint =
+    typeof pinPoint === 'number' &&
+    typeof otherPoint === 'number' &&
+    pinPoint === otherPoint;
+
+  const pEdge = samePoint ? priceEdgePct(pinPrice, otherPrice) : 0;
+  const nEdge = pointEdgePct(market, row.label, pinPoint, otherPoint);
+
+  if (nEdge > 0 && pEdge > 0) {
+    return {
+      type: 'both',
+      pct: nEdge + pEdge,
+      reason: 'number + price',
+    };
+  }
+
+  if (nEdge > 0) {
+    return {
+      type: 'point',
+      pct: nEdge,
+      reason: 'number',
+    };
+  }
+
+  if (pEdge > 0) {
+    return {
+      type: 'price',
+      pct: pEdge,
+      reason: 'price',
+    };
+  }
+
+  return { type: null, pct: 0, reason: '' };
+}
+
+function edgeBoxStyle(edge: EdgeType): React.CSSProperties {
+  if (edge === 'price') {
+    return {
+      background: 'rgba(59, 130, 246, 0.18)',
+      border: '1px solid rgba(59, 130, 246, 0.65)',
+      color: '#dbeafe',
+    };
+  }
+
+  if (edge === 'point') {
+    return {
+      background: 'rgba(245, 158, 11, 0.18)',
+      border: '1px solid rgba(245, 158, 11, 0.65)',
+      color: '#fef3c7',
+    };
+  }
+
+  if (edge === 'both') {
+    return {
+      background: 'rgba(168, 85, 247, 0.20)',
+      border: '1px solid rgba(168, 85, 247, 0.70)',
+      color: '#f3e8ff',
+    };
+  }
+
+  return {
+    background: 'transparent',
+    border: '1px solid transparent',
+    color: '#94a3b8',
+  };
 }
 
 export default function App() {
@@ -156,7 +317,7 @@ export default function App() {
             </button>
           </div>
 
-          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
             <button
               onClick={() => setMarket('moneyline')}
               style={buttonStyle(market === 'moneyline', '#22c55e')}
@@ -175,6 +336,30 @@ export default function App() {
             >
               Total
             </button>
+          </div>
+
+          <div
+            style={{
+              display: 'grid',
+              gap: 8,
+              gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))',
+            }}
+          >
+            <LegendBox
+              title="PRICE EDGE"
+              text="Same number, better juice than Pinnacle"
+              edge="price"
+            />
+            <LegendBox
+              title="NUMBER EDGE"
+              text="Better point / total than Pinnacle"
+              edge="point"
+            />
+            <LegendBox
+              title="BOTH"
+              text="Better number and better price"
+              edge="both"
+            />
           </div>
         </div>
       </div>
@@ -223,7 +408,7 @@ export default function App() {
                 <div
                   style={{
                     display: 'grid',
-                    gridTemplateColumns: 'minmax(120px, 1.4fr) repeat(3, minmax(72px, 1fr))',
+                    gridTemplateColumns: 'minmax(120px, 1.4fr) repeat(3, minmax(90px, 1fr))',
                   }}
                 >
                   <CellHeader>
@@ -249,27 +434,72 @@ export default function App() {
 
                         {BOOKS.map((book) => {
                           const isBest = best.includes(book);
+                          const edge = getEdgeInfo(market, row, book);
+
                           return (
                             <div
                               key={book}
                               style={valueCellStyle(idx === rows.length - 1, isBest)}
                             >
                               {market === 'moneyline' ? (
-                                <div style={{ fontWeight: 800 }}>
+                                <div style={{ fontWeight: 800, fontSize: 17 }}>
                                   {formatOdds(row.prices[book])}
                                 </div>
                               ) : (
                                 <>
-                                  <div style={{ fontWeight: 800 }}>{row.points[book] ?? '—'}</div>
+                                  <div style={{ fontWeight: 800, fontSize: 17 }}>
+                                    {row.points[book] ?? '—'}
+                                  </div>
                                   <div
                                     style={{
                                       fontSize: 13,
                                       color: isBest ? '#bbf7d0' : '#94a3b8',
+                                      marginTop: 2,
                                     }}
                                   >
                                     {formatOdds(row.prices[book])}
                                   </div>
                                 </>
+                              )}
+
+                              {book !== 'Pinnacle' && edge.type && (
+                                <div
+                                  style={{
+                                    marginTop: 8,
+                                    borderRadius: 12,
+                                    padding: '6px 6px',
+                                    textAlign: 'center',
+                                    ...edgeBoxStyle(edge.type),
+                                  }}
+                                >
+                                  <div
+                                    style={{
+                                      fontSize: 10,
+                                      fontWeight: 800,
+                                      letterSpacing: '0.04em',
+                                    }}
+                                  >
+                                    EDGE
+                                  </div>
+                                  <div
+                                    style={{
+                                      fontSize: 14,
+                                      fontWeight: 900,
+                                      marginTop: 2,
+                                    }}
+                                  >
+                                    {edge.pct.toFixed(1)}%
+                                  </div>
+                                  <div
+                                    style={{
+                                      fontSize: 10,
+                                      marginTop: 2,
+                                      opacity: 0.95,
+                                    }}
+                                  >
+                                    {edge.reason}
+                                  </div>
+                                </div>
                               )}
                             </div>
                           );
@@ -286,19 +516,14 @@ export default function App() {
   );
 }
 
-function buildMoneylineRows(game: RawGame) {
-  const rows: Array<{
-    label: string;
-    displayPoint: string;
-    prices: Partial<Record<BookKey, number>>;
-    points: Partial<Record<BookKey, string>>;
-  }> = [];
-
+function buildMoneylineRows(game: RawGame): RowData[] {
+  const rows: RowData[] = [];
   const labels = [game.away_team, game.home_team];
 
   for (const label of labels) {
     const prices: Partial<Record<BookKey, number>> = {};
     const points: Partial<Record<BookKey, string>> = {};
+    const pointNums: Partial<Record<BookKey, number>> = {};
 
     for (const bookmaker of game.bookmakers || []) {
       const book = toBookKey(bookmaker);
@@ -317,25 +542,21 @@ function buildMoneylineRows(game: RawGame) {
       displayPoint: '',
       prices,
       points,
+      pointNums,
     });
   }
 
   return rows;
 }
 
-function buildSpreadRows(game: RawGame) {
-  const rows: Array<{
-    label: string;
-    displayPoint: string;
-    prices: Partial<Record<BookKey, number>>;
-    points: Partial<Record<BookKey, string>>;
-  }> = [];
-
+function buildSpreadRows(game: RawGame): RowData[] {
+  const rows: RowData[] = [];
   const labels = [game.away_team, game.home_team];
 
   for (const label of labels) {
     const prices: Partial<Record<BookKey, number>> = {};
     const points: Partial<Record<BookKey, string>> = {};
+    const pointNums: Partial<Record<BookKey, number>> = {};
     let displayPoint = '—';
 
     for (const bookmaker of game.bookmakers || []) {
@@ -348,6 +569,9 @@ function buildSpreadRows(game: RawGame) {
       if (outcome) {
         prices[book] = outcome.price;
         points[book] = formatPoint(outcome.point);
+        if (typeof outcome.point === 'number') {
+          pointNums[book] = outcome.point;
+        }
         if (displayPoint === '—') displayPoint = formatPoint(outcome.point);
       }
     }
@@ -357,25 +581,21 @@ function buildSpreadRows(game: RawGame) {
       displayPoint,
       prices,
       points,
+      pointNums,
     });
   }
 
   return rows;
 }
 
-function buildTotalRows(game: RawGame) {
-  const rows: Array<{
-    label: string;
-    displayPoint: string;
-    prices: Partial<Record<BookKey, number>>;
-    points: Partial<Record<BookKey, string>>;
-  }> = [];
-
+function buildTotalRows(game: RawGame): RowData[] {
+  const rows: RowData[] = [];
   const labels = ['Over', 'Under'];
 
   for (const label of labels) {
     const prices: Partial<Record<BookKey, number>> = {};
     const points: Partial<Record<BookKey, string>> = {};
+    const pointNums: Partial<Record<BookKey, number>> = {};
     let displayPoint = '—';
 
     for (const bookmaker of game.bookmakers || []) {
@@ -388,8 +608,11 @@ function buildTotalRows(game: RawGame) {
       if (outcome) {
         prices[book] = outcome.price;
         points[book] = typeof outcome.point === 'number' ? `${outcome.point}` : '—';
-        if (displayPoint === '—' && typeof outcome.point === 'number') {
-          displayPoint = `${outcome.point}`;
+        if (typeof outcome.point === 'number') {
+          pointNums[book] = outcome.point;
+          if (displayPoint === '—') {
+            displayPoint = `${outcome.point}`;
+          }
         }
       }
     }
@@ -399,6 +622,7 @@ function buildTotalRows(game: RawGame) {
       displayPoint,
       prices,
       points,
+      pointNums,
     });
   }
 
@@ -417,6 +641,33 @@ function Box({ children }: { children: React.ReactNode }) {
       }}
     >
       {children}
+    </div>
+  );
+}
+
+function LegendBox({
+  title,
+  text,
+  edge,
+}: {
+  title: string;
+  text: string;
+  edge: EdgeType;
+}) {
+  return (
+    <div
+      style={{
+        borderRadius: 16,
+        padding: 12,
+        ...edgeBoxStyle(edge),
+      }}
+    >
+      <div style={{ fontSize: 11, fontWeight: 900, letterSpacing: '0.05em' }}>
+        {title}
+      </div>
+      <div style={{ fontSize: 12, marginTop: 6, lineHeight: 1.35 }}>
+        {text}
+      </div>
     </div>
   );
 }
@@ -450,43 +701,4 @@ const pillStyle: React.CSSProperties = {
   fontWeight: 700,
 };
 
-const refreshButtonStyle: React.CSSProperties = {
-  padding: '6px 12px',
-  borderRadius: 999,
-  border: '1px solid #22c55e',
-  background: 'rgba(34, 197, 94, 0.12)',
-  color: '#dcfce7',
-  fontSize: 12,
-  fontWeight: 700,
-  cursor: 'pointer',
-};
-
-function buttonStyle(active: boolean, color: string): React.CSSProperties {
-  return {
-    border: active ? `1px solid ${color}` : '1px solid #243041',
-    background: active ? `${color}22` : '#111827',
-    color: active ? '#ffffff' : '#cbd5e1',
-    padding: '10px 14px',
-    borderRadius: 12,
-    fontSize: 14,
-    fontWeight: 700,
-    cursor: 'pointer',
-  };
-}
-
-function leftCellStyle(last: boolean): React.CSSProperties {
-  return {
-    padding: 14,
-    borderBottom: last ? 'none' : '1px solid #182235',
-  };
-}
-
-function valueCellStyle(last: boolean, best: boolean): React.CSSProperties {
-  return {
-    padding: '14px 10px',
-    textAlign: 'center',
-    borderBottom: last ? 'none' : '1px solid #182235',
-    background: best ? 'rgba(34, 197, 94, 0.12)' : 'transparent',
-    color: best ? '#dcfce7' : '#e5e7eb',
-  };
-    }
+const refresh
