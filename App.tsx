@@ -734,3 +734,354 @@ export default function App() {
     </div>
   </div>
 )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function buildMoneylineRows(game: RawGame): RowData[] {
+  const rows: RowData[] = [];
+  const labels = [game.away_team, game.home_team];
+
+  for (const label of labels) {
+    const prices: Partial<Record<BookKey, number>> = {};
+    const points: Partial<Record<BookKey, string>> = {};
+    const pointNums: Partial<Record<BookKey, number>> = {};
+
+    for (const bookmaker of game.bookmakers || []) {
+      const book = toBookKey(bookmaker);
+      if (!book) continue;
+
+      const market = bookmaker.markets?.find((m) => m.key === 'h2h');
+      const outcome = market?.outcomes?.find((o) => o.name === label);
+
+      if (outcome) {
+        prices[book] = outcome.price;
+      }
+    }
+
+    rows.push({
+      label,
+      displayPoint: '',
+      prices,
+      points,
+      pointNums,
+    });
+  }
+
+  return rows;
+}
+
+function buildSpreadRows(game: RawGame): RowData[] {
+  const rows: RowData[] = [];
+  const labels = [game.away_team, game.home_team];
+
+  for (const label of labels) {
+    const prices: Partial<Record<BookKey, number>> = {};
+    const points: Partial<Record<BookKey, string>> = {};
+    const pointNums: Partial<Record<BookKey, number>> = {};
+    let displayPoint = '—';
+
+    for (const bookmaker of game.bookmakers || []) {
+      const book = toBookKey(bookmaker);
+      if (!book) continue;
+
+      const market = bookmaker.markets?.find((m) => m.key === 'spreads');
+      const outcome = market?.outcomes?.find((o) => o.name === label);
+
+      if (outcome) {
+        prices[book] = outcome.price;
+        points[book] = formatPoint(outcome.point);
+        if (typeof outcome.point === 'number') {
+          pointNums[book] = outcome.point;
+        }
+        if (displayPoint === '—') displayPoint = formatPoint(outcome.point);
+      }
+    }
+
+    rows.push({
+      label,
+      displayPoint,
+      prices,
+      points,
+      pointNums,
+    });
+  }
+
+  return rows;
+}
+
+function buildTotalRows(game: RawGame): RowData[] {
+  const rows: RowData[] = [];
+  const labels = ['Over', 'Under'];
+
+  for (const label of labels) {
+    const prices: Partial<Record<BookKey, number>> = {};
+    const points: Partial<Record<BookKey, string>> = {};
+    const pointNums: Partial<Record<BookKey, number>> = {};
+    let displayPoint = '—';
+
+    for (const bookmaker of game.bookmakers || []) {
+      const book = toBookKey(bookmaker);
+      if (!book) continue;
+
+      const market = bookmaker.markets?.find((m) => m.key === 'totals');
+      const outcome = market?.outcomes?.find((o) => o.name === label);
+
+      if (outcome) {
+        prices[book] = outcome.price;
+        points[book] = typeof outcome.point === 'number' ? `${outcome.point}` : '—';
+        if (typeof outcome.point === 'number') {
+          pointNums[book] = outcome.point;
+          if (displayPoint === '—') {
+            displayPoint = `${outcome.point}`;
+          }
+        }
+      }
+    }
+
+    rows.push({
+      label,
+      displayPoint,
+      prices,
+      points,
+      pointNums,
+    });
+  }
+
+  return rows;
+}
+
+function Box({ children }: { children: React.ReactNode }) {
+  return (
+    <div
+      style={{
+        background: 'rgba(15, 23, 42, 0.92)',
+        border: '1px solid #1f2937',
+        borderRadius: 20,
+        padding: 20,
+        color: '#cbd5e1',
+      }}
+    >
+      {children}
+    </div>
+  );
+}
+
+function LegendBox({
+  title,
+  text,
+  edge,
+}: {
+  title: string;
+  text: string;
+  edge: EdgeType;
+}) {
+  return (
+    <div
+      style={{
+        borderRadius: 12,
+        padding: '8px 10px',
+        minHeight: 0,
+        ...edgeBoxStyle(edge),
+      }}
+    >
+      <div
+        style={{
+          fontSize: 10,
+          fontWeight: 900,
+          letterSpacing: '0.05em',
+          lineHeight: 1.1,
+        }}
+      >
+        {title}
+      </div>
+      <div
+        style={{
+          fontSize: 11,
+          marginTop: 4,
+          lineHeight: 1.25,
+        }}
+      >
+        {text}
+      </div>
+    </div>
+  );
+}
+
+function CellHeader({ children }: { children: React.ReactNode }) {
+  return (
+    <div
+      style={{
+        padding: '12px 10px',
+        textAlign: 'center',
+        borderBottom: '1px solid #182235',
+        color: '#94a3b8',
+        fontSize: 12,
+        fontWeight: 700,
+        textTransform: 'uppercase',
+      }}
+    >
+      {children}
+    </div>
+  );
+}
+
+function InputCard({
+  label,
+  value,
+  onChange,
+  placeholder,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  placeholder: string;
+}) {
+  return (
+    <div
+      style={{
+        background: 'rgba(10, 18, 32, 0.85)',
+        border: '1px solid #243041',
+        borderRadius: 16,
+        padding: 14,
+      }}
+    >
+      <div
+        style={{
+          fontSize: 12,
+          color: '#94a3b8',
+          fontWeight: 700,
+          marginBottom: 8,
+          textTransform: 'uppercase',
+        }}
+      >
+        {label}
+      </div>
+      <input
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+        inputMode="decimal"
+        style={{
+          width: '100%',
+          background: '#0b1220',
+          color: '#e5e7eb',
+          border: '1px solid #334155',
+          borderRadius: 12,
+          padding: '12px 14px',
+          fontSize: 16,
+          boxSizing: 'border-box',
+        }}
+      />
+    </div>
+  );
+}
+
+function StatCard({
+  title,
+  value,
+}: {
+  title: string;
+  value: string;
+}) {
+  return (
+    <div
+      style={{
+        background: 'rgba(10, 18, 32, 0.85)',
+        border: '1px solid #243041',
+        borderRadius: 16,
+        padding: 14,
+      }}
+    >
+      <div
+        style={{
+          fontSize: 12,
+          color: '#94a3b8',
+          fontWeight: 700,
+          marginBottom: 8,
+          textTransform: 'uppercase',
+        }}
+      >
+        {title}
+      </div>
+      <div
+        style={{
+          fontSize: 24,
+          fontWeight: 800,
+          color: '#f8fafc',
+        }}
+      >
+        {value}
+      </div>
+    </div>
+  );
+}
+
+function formatMoney(value: number): string {
+  if (!Number.isFinite(value)) return '$0.00';
+  return new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: 'USD',
+  }).format(value);
+}
+
+const toolGridStyle: React.CSSProperties = {
+  display: 'grid',
+  gap: 12,
+  gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+};
+
+const pillStyle: React.CSSProperties = {
+  display: 'inline-block',
+  padding: '6px 10px',
+  borderRadius: 999,
+  border: '1px solid #243041',
+  background: '#111827',
+  color: '#cbd5e1',
+  fontSize: 12,
+  fontWeight: 700,
+};
+
+const refreshButtonStyle: React.CSSProperties = {
+  padding: '6px 12px',
+  borderRadius: 999,
+  border: '1px solid #22c55e',
+  background: 'rgba(34, 197, 94, 0.12)',
+  color: '#dcfce7',
+  fontSize: 12,
+  fontWeight: 700,
+  cursor: 'pointer',
+};
+
+function buttonStyle(active: boolean, color: string): React.CSSProperties {
+  return {
+    border: active ? `1px solid ${color}` : '1px solid #243041',
+    background: active ? `${color}22` : '#111827',
+    color: active ? '#ffffff' : '#cbd5e1',
+    padding: '10px 14px',
+    borderRadius: 12,
+    fontSize: 14,
+    fontWeight: 700,
+    cursor: 'pointer',
+  };
+}
+
+function leftCellStyle(last: boolean): React.CSSProperties {
+  return {
+    padding: 14,
+    borderBottom: last ? 'none' : '1px solid #182235',
+  };
+}
+
+function valueCellStyle(last: boolean, best: boolean): React.CSSProperties {
+  return {
+    padding: '14px 10px',
+    textAlign: 'center',
+    borderBottom: last ? 'none' : '1px solid #182235',
+    background: best ? 'rgba(34, 197, 94, 0.10)' : 'transparent',
+    color: best ? '#dcfce7' : '#e5e7eb',
+  };
+      }
