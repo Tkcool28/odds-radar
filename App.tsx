@@ -637,11 +637,100 @@ export default function App() {
 
           <div style={{ padding: 16 }}>
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 16 }}>
-              <button
-                onClick={() => setToolTab('odds')}
-                style={buttonStyle(toolTab === 'odds', '#22c55e')}
-              >
-                Odds Calculator
-              </button>
-              <button
-                onClick=
+  <button
+    onClick={() => setToolTab('odds')}
+    style={buttonStyle(toolTab === 'odds', '#22c55e')}
+  >
+    Odds Calculator
+  </button>
+  <button
+    onClick={() => setToolTab('hedge')}
+    style={buttonStyle(toolTab === 'hedge', '#22c55e')}
+  >
+    Hedge Calculator
+  </button>
+</div>
+
+{toolTab === 'odds' && (
+  <div style={{ display: 'grid', gap: 16 }}>
+    <div style={toolGridStyle}>
+      <InputCard
+        label="American Odds"
+        value={calcOdds}
+        onChange={setCalcOdds}
+        placeholder="-110 or +150"
+      />
+      <InputCard
+        label="Stake"
+        value={calcStake}
+        onChange={setCalcStake}
+        placeholder="10"
+      />
+    </div>
+
+    <div style={toolGridStyle}>
+      <StatCard
+        title="Profit"
+        value={formatMoney(oddsCalc.profit)}
+      />
+      <StatCard
+        title="Total Return"
+        value={formatMoney(oddsCalc.totalReturn)}
+      />
+      <StatCard
+        title="Implied Probability"
+        value={`${oddsCalc.implied.toFixed(2)}%`}
+      />
+    </div>
+  </div>
+)}
+
+{toolTab === 'hedge' && (
+  <div style={{ display: 'grid', gap: 16 }}>
+    <div style={toolGridStyle}>
+      <InputCard
+        label="Original Stake"
+        value={hedgeOrigStake}
+        onChange={setHedgeOrigStake}
+        placeholder="10"
+      />
+      <InputCard
+        label="Original Odds"
+        value={hedgeOrigOdds}
+        onChange={setHedgeOrigOdds}
+        placeholder="+180"
+      />
+      <InputCard
+        label="Hedge Stake"
+        value={hedgeHedgeStake}
+        onChange={setHedgeHedgeStake}
+        placeholder="8"
+      />
+      <InputCard
+        label="Hedge Odds"
+        value={hedgeHedgeOdds}
+        onChange={setHedgeHedgeOdds}
+        placeholder="-125"
+      />
+    </div>
+
+    <div style={toolGridStyle}>
+      <StatCard
+        title="Net if Original Wins"
+        value={formatMoney(hedgeCalc.netIfOriginalWins)}
+      />
+      <StatCard
+        title="Net if Hedge Wins"
+        value={formatMoney(hedgeCalc.netIfHedgeWins)}
+      />
+      <StatCard
+        title="Total Risked"
+        value={formatMoney(hedgeCalc.totalRisk)}
+      />
+      <StatCard
+        title="Break-Even Hedge Stake"
+        value={formatMoney(hedgeCalc.breakEvenHedgeStake)}
+      />
+    </div>
+  </div>
+)}
