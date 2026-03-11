@@ -79,7 +79,9 @@ function statusText(commenceTime: string) {
 }
 
 function getBestPrice(values: Partial<Record<BookKey, number>>): BookKey[] {
-  const nums = BOOKS.map((b) => values[b]).filter((v): v is number => typeof v === 'number');
+  const nums = BOOKS.map((b) => values[b]).filter(
+    (v): v is number => typeof v === 'number'
+  );
   if (nums.length === 0) return [];
   const best = Math.max(...nums);
   return BOOKS.filter((b) => values[b] === best);
@@ -115,18 +117,14 @@ function pointEdgePct(
   let delta = 0;
 
   if (market === 'spread') {
-    // Bigger number is always better for the bettor:
-    // +5.5 better than +4.5, -3.5 better than -4.5
     delta = otherPoint - pinPoint;
     return Math.max(0, delta * 2.0);
   }
 
   if (market === 'total') {
     if (label === 'Over') {
-      // Lower total is better for Over
       delta = pinPoint - otherPoint;
     } else {
-      // Higher total is better for Under
       delta = otherPoint - pinPoint;
     }
 
@@ -273,7 +271,8 @@ export default function App() {
     <div
       style={{
         minHeight: '100vh',
-        background: 'linear-gradient(180deg, #07111f 0%, #0b1220 45%, #0d1424 100%)',
+        background:
+          'linear-gradient(180deg, #07111f 0%, #0b1220 45%, #0d1424 100%)',
         color: '#e5e7eb',
         fontFamily: 'Inter, Arial, sans-serif',
       }}
@@ -341,23 +340,24 @@ export default function App() {
           <div
             style={{
               display: 'grid',
-              gap: 8,
-              gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))',
+              gap: 6,
+              gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))',
+              alignItems: 'start',
             }}
           >
             <LegendBox
               title="PRICE EDGE"
-              text="Same number, better juice than Pinnacle"
+              text="Same number, better juice"
               edge="price"
             />
             <LegendBox
               title="NUMBER EDGE"
-              text="Better point / total than Pinnacle"
+              text="Better point / total"
               edge="point"
             />
             <LegendBox
               title="BOTH"
-              text="Better number and better price"
+              text="Better number and price"
               edge="both"
             />
           </div>
@@ -407,106 +407,129 @@ export default function App() {
 
                 <div
                   style={{
-                    display: 'grid',
-                    gridTemplateColumns: 'minmax(120px, 1.4fr) repeat(3, minmax(90px, 1fr))',
+                    padding: '0 16px 8px',
+                    fontSize: 12,
+                    color: '#94a3b8',
                   }}
                 >
-                  <CellHeader>
-                    {market === 'moneyline' ? 'Team' : market === 'spread' ? 'Spread' : 'Total'}
-                  </CellHeader>
-                  {BOOKS.map((book) => (
-                    <CellHeader key={book}>{book}</CellHeader>
-                  ))}
+                  Swipe sideways to view all books
+                </div>
 
-                  {rows.map((row, idx) => {
-                    const best = getBestPrice(row.prices);
+                <div
+                  style={{
+                    overflowX: 'auto',
+                    WebkitOverflowScrolling: 'touch',
+                  }}
+                >
+                  <div
+                    style={{
+                      display: 'grid',
+                      gridTemplateColumns:
+                        'minmax(160px, 1.4fr) repeat(3, minmax(140px, 1fr))',
+                      minWidth: 620,
+                    }}
+                  >
+                    <CellHeader>
+                      {market === 'moneyline'
+                        ? 'Team'
+                        : market === 'spread'
+                        ? 'Spread'
+                        : 'Total'}
+                    </CellHeader>
+                    {BOOKS.map((book) => (
+                      <CellHeader key={book}>{book}</CellHeader>
+                    ))}
 
-                    return (
-                      <React.Fragment key={`${game.id}-${row.label}-${idx}`}>
-                        <div style={leftCellStyle(idx === rows.length - 1)}>
-                          <div style={{ fontWeight: 700 }}>{row.label}</div>
-                          {market !== 'moneyline' && (
-                            <div style={{ fontSize: 13, color: '#94a3b8', marginTop: 4 }}>
-                              {row.displayPoint}
-                            </div>
-                          )}
-                        </div>
+                    {rows.map((row, idx) => {
+                      const best = getBestPrice(row.prices);
 
-                        {BOOKS.map((book) => {
-                          const isBest = best.includes(book);
-                          const edge = getEdgeInfo(market, row, book);
+                      return (
+                        <React.Fragment key={`${game.id}-${row.label}-${idx}`}>
+                          <div style={leftCellStyle(idx === rows.length - 1)}>
+                            <div style={{ fontWeight: 700 }}>{row.label}</div>
+                            {market !== 'moneyline' && (
+                              <div style={{ fontSize: 13, color: '#94a3b8', marginTop: 4 }}>
+                                {row.displayPoint}
+                              </div>
+                            )}
+                          </div>
 
-                          return (
-                            <div
-                              key={book}
-                              style={valueCellStyle(idx === rows.length - 1, isBest)}
-                            >
-                              {market === 'moneyline' ? (
-                                <div style={{ fontWeight: 800, fontSize: 17 }}>
-                                  {formatOdds(row.prices[book])}
-                                </div>
-                              ) : (
-                                <>
+                          {BOOKS.map((book) => {
+                            const isBest = best.includes(book);
+                            const edge = getEdgeInfo(market, row, book);
+
+                            return (
+                              <div
+                                key={book}
+                                style={valueCellStyle(idx === rows.length - 1, isBest)}
+                              >
+                                {market === 'moneyline' ? (
                                   <div style={{ fontWeight: 800, fontSize: 17 }}>
-                                    {row.points[book] ?? '—'}
-                                  </div>
-                                  <div
-                                    style={{
-                                      fontSize: 13,
-                                      color: isBest ? '#bbf7d0' : '#94a3b8',
-                                      marginTop: 2,
-                                    }}
-                                  >
                                     {formatOdds(row.prices[book])}
                                   </div>
-                                </>
-                              )}
+                                ) : (
+                                  <>
+                                    <div style={{ fontWeight: 800, fontSize: 17 }}>
+                                      {row.points[book] ?? '—'}
+                                    </div>
+                                    <div
+                                      style={{
+                                        fontSize: 13,
+                                        color: isBest ? '#bbf7d0' : '#94a3b8',
+                                        marginTop: 2,
+                                      }}
+                                    >
+                                      {formatOdds(row.prices[book])}
+                                    </div>
+                                  </>
+                                )}
 
-                              {book !== 'Pinnacle' && edge.type && (
-                                <div
-                                  style={{
-                                    marginTop: 8,
-                                    borderRadius: 12,
-                                    padding: '6px 6px',
-                                    textAlign: 'center',
-                                    ...edgeBoxStyle(edge.type),
-                                  }}
-                                >
+                                {book !== 'Pinnacle' && edge.type && (
                                   <div
                                     style={{
-                                      fontSize: 10,
-                                      fontWeight: 800,
-                                      letterSpacing: '0.04em',
+                                      marginTop: 8,
+                                      borderRadius: 12,
+                                      padding: '6px 6px',
+                                      textAlign: 'center',
+                                      ...edgeBoxStyle(edge.type),
                                     }}
                                   >
-                                    EDGE
+                                    <div
+                                      style={{
+                                        fontSize: 10,
+                                        fontWeight: 800,
+                                        letterSpacing: '0.04em',
+                                      }}
+                                    >
+                                      EDGE
+                                    </div>
+                                    <div
+                                      style={{
+                                        fontSize: 14,
+                                        fontWeight: 900,
+                                        marginTop: 2,
+                                      }}
+                                    >
+                                      {edge.pct.toFixed(1)}%
+                                    </div>
+                                    <div
+                                      style={{
+                                        fontSize: 10,
+                                        marginTop: 2,
+                                        opacity: 0.95,
+                                      }}
+                                    >
+                                      {edge.reason}
+                                    </div>
                                   </div>
-                                  <div
-                                    style={{
-                                      fontSize: 14,
-                                      fontWeight: 900,
-                                      marginTop: 2,
-                                    }}
-                                  >
-                                    {edge.pct.toFixed(1)}%
-                                  </div>
-                                  <div
-                                    style={{
-                                      fontSize: 10,
-                                      marginTop: 2,
-                                      opacity: 0.95,
-                                    }}
-                                  >
-                                    {edge.reason}
-                                  </div>
-                                </div>
-                              )}
-                            </div>
-                          );
-                        })}
-                      </React.Fragment>
-                    );
-                  })}
+                                )}
+                              </div>
+                            );
+                          })}
+                        </React.Fragment>
+                      );
+                    })}
+                  </div>
                 </div>
               </div>
             );
@@ -657,15 +680,29 @@ function LegendBox({
   return (
     <div
       style={{
-        borderRadius: 16,
-        padding: 12,
+        borderRadius: 12,
+        padding: '8px 10px',
+        minHeight: 0,
         ...edgeBoxStyle(edge),
       }}
     >
-      <div style={{ fontSize: 11, fontWeight: 900, letterSpacing: '0.05em' }}>
+      <div
+        style={{
+          fontSize: 10,
+          fontWeight: 900,
+          letterSpacing: '0.05em',
+          lineHeight: 1.1,
+        }}
+      >
         {title}
       </div>
-      <div style={{ fontSize: 12, marginTop: 6, lineHeight: 1.35 }}>
+      <div
+        style={{
+          fontSize: 11,
+          marginTop: 4,
+          lineHeight: 1.25,
+        }}
+      >
         {text}
       </div>
     </div>
@@ -700,6 +737,7 @@ const pillStyle: React.CSSProperties = {
   fontSize: 12,
   fontWeight: 700,
 };
+
 const refreshButtonStyle: React.CSSProperties = {
   padding: '6px 12px',
   borderRadius: 999,
@@ -740,4 +778,3 @@ function valueCellStyle(last: boolean, best: boolean): React.CSSProperties {
     color: best ? '#dcfce7' : '#e5e7eb',
   };
 }
-
