@@ -1,6 +1,8 @@
-export default async function handler(req, res) {
+declare const process: any;
+
+export default async function handler(req: any, res: any) {
   try {
-    const apiKey = process.env.THE_ODDS_API_KEY;
+    const apiKey = process?.env?.THE_ODDS_API_KEY;
 
     if (!apiKey) {
       return res.status(500).json({
@@ -9,11 +11,11 @@ export default async function handler(req, res) {
       });
     }
 
-    const sport = req.query.sport || "basketball_nba";
+    const sport = req.query?.sport || "basketball_nba";
 
     const url =
       `https://api.the-odds-api.com/v4/sports/${sport}/odds` +
-      `?apiKey=${apiKey}` +
+      `?apiKey=${encodeURIComponent(apiKey)}` +
       `&regions=us` +
       `&markets=h2h,spreads,totals` +
       `&oddsFormat=american` +
@@ -35,10 +37,10 @@ export default async function handler(req, res) {
       ok: true,
       games: data
     });
-  } catch (error) {
+  } catch (error: any) {
     return res.status(500).json({
       ok: false,
-      error: error.message
+      error: error?.message || "Unknown server error"
     });
   }
 }
