@@ -108,11 +108,6 @@ export default function App() {
     loadGames();
   }, [sport]);
 
-  useEffect(() => {
-    const id = window.setInterval(loadGames, 30000);
-    return () => window.clearInterval(id);
-  }, [sport]);
-
   return (
     <div
       style={{
@@ -141,6 +136,9 @@ export default function App() {
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
             <span style={pillStyle}>Mode: Live</span>
             <span style={pillStyle}>Updated: {updated || '—'}</span>
+            <button onClick={loadGames} style={refreshButtonStyle} disabled={loading}>
+              {loading ? 'Loading…' : 'Refresh'}
+            </button>
           </div>
 
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
@@ -452,6 +450,17 @@ const pillStyle: React.CSSProperties = {
   fontWeight: 700,
 };
 
+const refreshButtonStyle: React.CSSProperties = {
+  padding: '6px 12px',
+  borderRadius: 999,
+  border: '1px solid #22c55e',
+  background: 'rgba(34, 197, 94, 0.12)',
+  color: '#dcfce7',
+  fontSize: 12,
+  fontWeight: 700,
+  cursor: 'pointer',
+};
+
 function buttonStyle(active: boolean, color: string): React.CSSProperties {
   return {
     border: active ? `1px solid ${color}` : '1px solid #243041',
@@ -480,4 +489,4 @@ function valueCellStyle(last: boolean, best: boolean): React.CSSProperties {
     background: best ? 'rgba(34, 197, 94, 0.12)' : 'transparent',
     color: best ? '#dcfce7' : '#e5e7eb',
   };
-      }
+    }
