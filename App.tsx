@@ -1,29 +1,17 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 
 type BookKey = 'Pinnacle' | 'FanDuel' | 'DraftKings';
 type MarketTab = 'moneyline' | 'spread' | 'total';
+type SportKey = 'basketball_nba' | 'icehockey_nhl';
 
-type MoneylineRow = {
-  team: string;
-  Pinnacle: number;
-  FanDuel: number;
-  DraftKings: number;
+type OddsCell = {
+  price?: number;
+  point?: number;
 };
 
-type SpreadRow = {
-  team: string;
-  line: number;
-  Pinnacle: number;
-  FanDuel: number;
-  DraftKings: number;
-};
-
-type TotalRow = {
-  side: 'Over' | 'Under';
-  line: number;
-  Pinnacle: number;
-  FanDuel: number;
-  DraftKings: number;
+type OutcomeRow = {
+  label: string;
+  books: Record<BookKey, OddsCell>;
 };
 
 type EventCard = {
@@ -31,82 +19,308 @@ type EventCard = {
   league: string;
   status: string;
   matchup: string;
-  moneyline: MoneylineRow[];
-  spread: SpreadRow[];
-  total: TotalRow[];
+  moneyline: OutcomeRow[];
+  spread: OutcomeRow[];
+  total: OutcomeRow[];
+};
+
+type RawOutcome = {
+  name: string;
+  price: number;
+  point?: number;
+};
+
+type RawMarket = {
+  key: string;
+  outcomes: RawOutcome[];
+};
+
+type RawBookmaker = {
+  key: string;
+  title: string;
+  markets: RawMarket[];
+};
+
+type RawGame = {
+  id: string;
+  sport_key: string;
+  sport_title: string;
+  commence_time: string;
+  home_team: string;
+  away_team: string;
+  bookmakers?: RawBookmaker[];
 };
 
 const BOOKS: BookKey[] = ['Pinnacle', 'FanDuel', 'DraftKings'];
+const AUTO_REFRESH_MS = 30000;
 
-const SAMPLE_EVENTS: EventCard[] = [
-  {
-    id: '1',
-    league: 'NBA',
-    status: 'Live • Q3 07:42',
-    matchup: 'Lakers vs Nuggets',
-    moneyline: [
-      { team: 'Lakers', Pinnacle: 145, FanDuel: 150, DraftKings: 148 },
-      { team: 'Nuggets', Pinnacle: -160, FanDuel: -155, DraftKings: -158 },
-    ],
-    spread: [
-      { team: 'Lakers', line: 4.5, Pinnacle: -108, FanDuel: -105, DraftKings: -110 },
-      { team: 'Nuggets', line: -4.5, Pinnacle: -112, FanDuel: -115, DraftKings: -110 },
-    ],
-    total: [
-      { side: 'Over', line: 228.5, Pinnacle: -110, FanDuel: -108, DraftKings: -105 },
-      { side: 'Under', line: 228.5, Pinnacle: -110, FanDuel: -112, DraftKings: -115 },
-    ],
-  },
-  {
-    id: '2',
-    league: 'NHL',
-    status: 'Pregame • 8:10 PM',
-    matchup: 'Rangers vs Bruins',
-    moneyline: [
-      { team: 'Rangers', Pinnacle: 122, FanDuel: 118, DraftKings: 125 },
-      { team: 'Bruins', Pinnacle: -132, FanDuel: -128, DraftKings: -135 },
-    ],
-    spread: [
-      { team: 'Rangers', line: 1.5, Pinnacle: -175, FanDuel: -170, DraftKings: -168 },
-      { team: 'Bruins', line: -1.5, Pinnacle: 155, FanDuel: 150, DraftKings: 158 },
-    ],
-    total: [
-      { side: 'Over', line: 5.5, Pinnacle: -102, FanDuel: 100, DraftKings: -105 },
-      { side: 'Under', line: 5.5, Pinnacle: -118, FanDuel: -120, DraftKings: -115 },
-    ],
-  },
-];
+function emptyBooks(): Record<BookKey, OddsCell> {
+  return {
+    Pinnacle: {},
+    FanDuel: {},
+    DraftKings: {},
+  };
+}
 
-function formatAmericanOdds(value: number): string {
+function formatAmericanOdds(value?: number): string {
+  if (typeof value !== 'number') return '—';
   if (value > 0) return `+${value}`;
   return `${value}`;
 }
 
-function bestBookForPrice(row: Record<BookKey, number>): BookKey[] {
-  const best = Math.max(...BOOKS.map((book) => row[book]));
-  return BOOKS.filter((book) => row[book] === best);
+function formatPoint(value?: number): string {
+  if (typeof value !== 'number') return '—';
+  if (value > 0) return `+${value}`;
+  return `${value}`;
 }
 
-function bestBookForLineAndPrice(
-  row: Record<BookKey, number>,
-  preferredHigher: boolean
-): BookKey[] {
-  const values = BOOKS.map((book) => row[book]);
-  const target = preferredHigher ? Math.max(...values) : Math.min(...values);
-  return BOOKS.filter((book) => row[book] === target);
+function toBookKey(title?: string, key?: string): BookKey | null {
+  const v = `${title || ''} ${key || ''}`.toLowerCase();
+
+  if (v.includes('pinnacle')) return 'Pinnacle';
+  if (v.includes('fanduel')) return 'FanDuel';
+  if (v.includes('draftkings')) return 'DraftKings';
+
+  return null;
 }
 
-function bestSpreadBooks(line: number, row: Record<BookKey, number>): BookKey[] {
-  const prefersHigherLine = line > 0;
-  return bestBookForLineAndPrice(row, prefersHigherLine);
+function getStatus(commenceTime: string): string {
+  const start = new Date(commenceTime).getTime();
+  const now = Date.now();
+  const diff = start - now;
+
+  if (diff <= 0) {
+    return 'Live / In Progress';
+  }
+
+  return `Starts ${new Date(commenceTime).toLocaleString([], {
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  })}`;
 }
 
-function bestTotalBooks(side: 'Over' | 'Under', row: Record<BookKey, number>): BookKey[] {
-  const prefersHigherLine = side === 'Over';
-  return bestBookForLineAndPrice(row, prefersHigherLine);
+function buildMoneylineRows(game: RawGame): OutcomeRow[] {
+  const map = new Map<string, OutcomeRow>();
+
+  for (const bookmaker of game.bookmakers || []) {
+    const book = toBookKey(bookmaker.title, bookmaker.key);
+    if (!book) continue;
+
+    const market = bookmaker.markets?.find((m) => m.key === 'h2h');
+    if (!market) continue;
+
+    for (const outcome of market.outcomes || []) {
+      const label = outcome.name;
+      if (!map.has(label)) {
+        map.set(label, {
+          label,
+          books: emptyBooks(),
+        });
+      }
+
+      map.get(label)!.books[book] = {
+        price: outcome.price,
+      };
+    }
+  }
+
+  const rows = Array.from(map.values());
+
+  rows.sort((a, b) => {
+    if (a.label === game.away_team) return -1;
+    if (b.label === game.away_team) return 1;
+    if (a.label === game.home_team) return 1;
+    if (b.label === game.home_team) return -1;
+    return a.label.localeCompare(b.label);
+  });
+
+  return rows;
 }
 
-function statPill(text: string) {
+function buildSpreadRows(game: RawGame): OutcomeRow[] {
+  const map = new Map<string, OutcomeRow>();
+
+  for (const bookmaker of game.bookmakers || []) {
+    const book = toBookKey(bookmaker.title, bookmaker.key);
+    if (!book) continue;
+
+    const market = bookmaker.markets?.find((m) => m.key === 'spreads');
+    if (!market) continue;
+
+    for (const outcome of market.outcomes || []) {
+      const label = outcome.name;
+      if (!map.has(label)) {
+        map.set(label, {
+          label,
+          books: emptyBooks(),
+        });
+      }
+
+      map.get(label)!.books[book] = {
+        price: outcome.price,
+        point: outcome.point,
+      };
+    }
+  }
+
+  const rows = Array.from(map.values());
+
+  rows.sort((a, b) => {
+    if (a.label === game.away_team) return -1;
+    if (b.label === game.away_team) return 1;
+    if (a.label === game.home_team) return 1;
+    if (b.label === game.home_team) return -1;
+    return a.label.localeCompare(b.label);
+  });
+
+  return rows;
+}
+
+function buildTotalRows(game: RawGame): OutcomeRow[] {
+  const map = new Map<string, OutcomeRow>();
+
+  for (const bookmaker of game.bookmakers || []) {
+    const book = toBookKey(bookmaker.title, bookmaker.key);
+    if (!book) continue;
+
+    const market = bookmaker.markets?.find((m) => m.key === 'totals');
+    if (!market) continue;
+
+    for (const outcome of market.outcomes || []) {
+      const label = outcome.name;
+      if (!map.has(label)) {
+        map.set(label, {
+          label,
+          books: emptyBooks(),
+        });
+      }
+
+      map.get(label)!.books[book] = {
+        price: outcome.price,
+        point: outcome.point,
+      };
+    }
+  }
+
+  const rows = Array.from(map.values());
+
+  rows.sort((a, b) => {
+    if (a.label === 'Over') return -1;
+    if (b.label === 'Over') return 1;
+    if (a.label === 'Under') return -1;
+    if (b.label === 'Under') return 1;
+    return a.label.localeCompare(b.label);
+  });
+
+  return rows;
+}
+
+function normalizeGames(rawGames: RawGame[]): EventCard[] {
+  return rawGames.map((game) => ({
+    id: game.id,
+    league: game.sport_title,
+    status: getStatus(game.commence_time),
+    matchup: `${game.away_team} vs ${game.home_team}`,
+    moneyline: buildMoneylineRows(game),
+    spread: buildSpreadRows(game),
+    total: buildTotalRows(game),
+  }));
+}
+
+function bestMoneylineBooks(row: OutcomeRow): BookKey[] {
+  let best = -Infinity;
+
+  for (const book of BOOKS) {
+    const price = row.books[book].price;
+    if (typeof price === 'number' && price > best) {
+      best = price;
+    }
+  }
+
+  if (!Number.isFinite(best)) return [];
+
+  return BOOKS.filter((book) => row.books[book].price === best);
+}
+
+function compareSpreadCell(a: OddsCell, b: OddsCell): number {
+  const aPoint = typeof a.point === 'number' ? a.point : -Infinity;
+  const bPoint = typeof b.point === 'number' ? b.point : -Infinity;
+
+  if (aPoint !== bPoint) return aPoint - bPoint;
+
+  const aPrice = typeof a.price === 'number' ? a.price : -Infinity;
+  const bPrice = typeof b.price === 'number' ? b.price : -Infinity;
+
+  return aPrice - bPrice;
+}
+
+function compareTotalCell(label: string, a: OddsCell, b: OddsCell): number {
+  const aPoint = typeof a.point === 'number' ? a.point : label === 'Over' ? Infinity : -Infinity;
+  const bPoint = typeof b.point === 'number' ? b.point : label === 'Over' ? Infinity : -Infinity;
+
+  if (label === 'Over') {
+    if (aPoint !== bPoint) return bPoint - aPoint;
+  } else {
+    if (aPoint !== bPoint) return aPoint - bPoint;
+  }
+
+  const aPrice = typeof a.price === 'number' ? a.price : -Infinity;
+  const bPrice = typeof b.price === 'number' ? b.price : -Infinity;
+
+  return aPrice - bPrice;
+}
+
+function bestSpreadBooks(row: OutcomeRow): BookKey[] {
+  let bestBook: BookKey | null = null;
+
+  for (const book of BOOKS) {
+    const cell = row.books[book];
+    if (typeof cell.point !== 'number' && typeof cell.price !== 'number') continue;
+
+    if (!bestBook) {
+      bestBook = book;
+      continue;
+    }
+
+    if (compareSpreadCell(cell, row.books[bestBook]) > 0) {
+      bestBook = book;
+    }
+  }
+
+  if (!bestBook) return [];
+
+  return BOOKS.filter(
+    (book) => compareSpreadCell(row.books[book], row.books[bestBook!]) === 0
+  );
+}
+
+function bestTotalBooks(row: OutcomeRow): BookKey[] {
+  let bestBook: BookKey | null = null;
+
+  for (const book of BOOKS) {
+    const cell = row.books[book];
+    if (typeof cell.point !== 'number' && typeof cell.price !== 'number') continue;
+
+    if (!bestBook) {
+      bestBook = book;
+      continue;
+    }
+
+    if (compareTotalCell(row.label, cell, row.books[bestBook]) > 0) {
+      bestBook = book;
+    }
+  }
+
+  if (!bestBook) return [];
+
+  return BOOKS.filter(
+    (book) => compareTotalCell(row.label, row.books[book], row.books[bestBook!]) === 0
+  );
+}
+
+function pill(text: string) {
   return (
     <span
       style={{
@@ -117,7 +331,7 @@ function statPill(text: string) {
         background: '#111827',
         color: '#cbd5e1',
         fontSize: 12,
-        fontWeight: 600,
+        fontWeight: 700,
       }}
     >
       {text}
@@ -127,13 +341,57 @@ function statPill(text: string) {
 
 export default function App() {
   const [market, setMarket] = useState<MarketTab>('moneyline');
+  const [sport, setSport] = useState<SportKey>('basketball_nba');
+  const [events, setEvents] = useState<EventCard[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [lastUpdated, setLastUpdated] = useState('');
 
-  const lastUpdated = useMemo(() => {
-    return new Date().toLocaleTimeString([], {
-      hour: 'numeric',
-      minute: '2-digit',
-    });
-  }, []);
+  async function loadOdds() {
+    try {
+      setLoading(true);
+      setError('');
+
+      const res = await fetch(`/api/odds?sport=${sport}`, {
+        cache: 'no-store',
+      });
+
+      const data = await res.json();
+
+      if (!res.ok || !data.ok) {
+        throw new Error(data.error || 'Failed to load odds');
+      }
+
+      const rawGames: RawGame[] = Array.isArray(data.games) ? data.games : [];
+      setEvents(normalizeGames(rawGames));
+      setLastUpdated(
+        new Date().toLocaleTimeString([], {
+          hour: 'numeric',
+          minute: '2-digit',
+        })
+      );
+    } catch (err: any) {
+      setError(err?.message || 'Unknown error');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    loadOdds();
+  }, [sport]);
+
+  useEffect(() => {
+    const id = window.setInterval(() => {
+      loadOdds();
+    }, AUTO_REFRESH_MS);
+
+    return () => window.clearInterval(id);
+  }, [sport]);
+
+  const titleSport = useMemo(() => {
+    return sport === 'basketball_nba' ? 'NBA' : 'NHL';
+  }, [sport]);
 
   return (
     <div
@@ -202,8 +460,8 @@ export default function App() {
                 alignItems: 'center',
               }}
             >
-              {statPill('Mode: Demo')}
-              {statPill(`Updated: ${lastUpdated}`)}
+              {pill(`Mode: Live ${titleSport}`)}
+              {pill(`Updated: ${lastUpdated || '—'}`)}
             </div>
           </div>
 
@@ -212,6 +470,39 @@ export default function App() {
               display: 'flex',
               gap: 8,
               marginTop: 14,
+              flexWrap: 'wrap',
+            }}
+          >
+            {(['basketball_nba', 'icehockey_nhl'] as SportKey[]).map((s) => {
+              const active = sport === s;
+              const label = s === 'basketball_nba' ? 'NBA' : 'NHL';
+
+              return (
+                <button
+                  key={s}
+                  onClick={() => setSport(s)}
+                  style={{
+                    border: active ? '1px solid #38bdf8' : '1px solid #243041',
+                    background: active ? 'rgba(56, 189, 248, 0.12)' : '#111827',
+                    color: active ? '#e0f2fe' : '#cbd5e1',
+                    padding: '10px 14px',
+                    borderRadius: 12,
+                    fontSize: 14,
+                    fontWeight: 700,
+                    cursor: 'pointer',
+                  }}
+                >
+                  {label}
+                </button>
+              );
+            })}
+          </div>
+
+          <div
+            style={{
+              display: 'flex',
+              gap: 8,
+              marginTop: 10,
               flexWrap: 'wrap',
             }}
           >
@@ -253,263 +544,190 @@ export default function App() {
           gap: 16,
         }}
       >
-        {SAMPLE_EVENTS.map((event) => (
+        {loading && (
           <div
-            key={event.id}
             style={{
               background: 'rgba(15, 23, 42, 0.92)',
               border: '1px solid #1f2937',
               borderRadius: 20,
-              overflow: 'hidden',
-              boxShadow: '0 10px 30px rgba(0,0,0,0.18)',
+              padding: 20,
+              color: '#cbd5e1',
             }}
           >
-            <div
-              style={{
-                padding: '16px 16px 12px',
-                borderBottom: '1px solid #182235',
-              }}
-            >
+            Loading live odds…
+          </div>
+        )}
+
+        {!loading && error && (
+          <div
+            style={{
+              background: 'rgba(60, 10, 10, 0.9)',
+              border: '1px solid #7f1d1d',
+              borderRadius: 20,
+              padding: 20,
+              color: '#fecaca',
+              fontWeight: 700,
+            }}
+          >
+            Error: {error}
+          </div>
+        )}
+
+        {!loading && !error && events.length === 0 && (
+          <div
+            style={{
+              background: 'rgba(15, 23, 42, 0.92)',
+              border: '1px solid #1f2937',
+              borderRadius: 20,
+              padding: 20,
+              color: '#cbd5e1',
+            }}
+          >
+            No games returned for this sport right now.
+          </div>
+        )}
+
+        {!loading &&
+          !error &&
+          events.map((event) => {
+            const rows =
+              market === 'moneyline'
+                ? event.moneyline
+                : market === 'spread'
+                ? event.spread
+                : event.total;
+
+            return (
               <div
+                key={event.id}
                 style={{
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  gap: 12,
-                  flexWrap: 'wrap',
+                  background: 'rgba(15, 23, 42, 0.92)',
+                  border: '1px solid #1f2937',
+                  borderRadius: 20,
+                  overflow: 'hidden',
+                  boxShadow: '0 10px 30px rgba(0,0,0,0.18)',
                 }}
               >
-                <div>
+                <div
+                  style={{
+                    padding: '16px 16px 12px',
+                    borderBottom: '1px solid #182235',
+                  }}
+                >
                   <div
                     style={{
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      gap: 12,
+                      flexWrap: 'wrap',
+                    }}
+                  >
+                    <div>
+                      <div
+                        style={{
+                          fontSize: 12,
+                          fontWeight: 700,
+                          letterSpacing: '0.06em',
+                          textTransform: 'uppercase',
+                          color: '#38bdf8',
+                          marginBottom: 6,
+                        }}
+                      >
+                        {event.league}
+                      </div>
+                      <div
+                        style={{
+                          fontSize: 24,
+                          fontWeight: 800,
+                          lineHeight: 1.15,
+                        }}
+                      >
+                        {event.matchup}
+                      </div>
+                    </div>
+
+                    <div
+                      style={{
+                        alignSelf: 'flex-start',
+                        fontSize: 13,
+                        color: '#94a3b8',
+                        fontWeight: 700,
+                      }}
+                    >
+                      {event.status}
+                    </div>
+                  </div>
+                </div>
+
+                <div
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns:
+                      'minmax(120px, 1.4fr) repeat(3, minmax(72px, 1fr))',
+                    gap: 0,
+                  }}
+                >
+                  <div
+                    style={{
+                      padding: '12px 14px',
+                      borderBottom: '1px solid #182235',
+                      color: '#94a3b8',
                       fontSize: 12,
                       fontWeight: 700,
-                      letterSpacing: '0.06em',
                       textTransform: 'uppercase',
-                      color: '#38bdf8',
-                      marginBottom: 6,
+                      letterSpacing: '0.06em',
                     }}
                   >
-                    {event.league}
+                    {market === 'moneyline'
+                      ? 'Team'
+                      : market === 'spread'
+                      ? 'Spread'
+                      : 'Total'}
                   </div>
-                  <div
-                    style={{
-                      fontSize: 24,
-                      fontWeight: 800,
-                      lineHeight: 1.15,
-                    }}
-                  >
-                    {event.matchup}
-                  </div>
-                </div>
 
-                <div
-                  style={{
-                    alignSelf: 'flex-start',
-                    fontSize: 13,
-                    color: '#94a3b8',
-                    fontWeight: 700,
-                  }}
-                >
-                  {event.status}
-                </div>
-              </div>
-            </div>
+                  {BOOKS.map((book) => (
+                    <div
+                      key={book}
+                      style={{
+                        padding: '12px 10px',
+                        textAlign: 'center',
+                        borderBottom: '1px solid #182235',
+                        color: '#94a3b8',
+                        fontSize: 12,
+                        fontWeight: 700,
+                        textTransform: 'uppercase',
+                        letterSpacing: '0.04em',
+                      }}
+                    >
+                      {book}
+                    </div>
+                  ))}
 
-            <div
-              style={{
-                display: 'grid',
-                gridTemplateColumns: 'minmax(120px, 1.4fr) repeat(3, minmax(72px, 1fr))',
-                gap: 0,
-              }}
-            >
-              <div
-                style={{
-                  padding: '12px 14px',
-                  borderBottom: '1px solid #182235',
-                  color: '#94a3b8',
-                  fontSize: 12,
-                  fontWeight: 700,
-                  textTransform: 'uppercase',
-                  letterSpacing: '0.06em',
-                }}
-              >
-                {market === 'moneyline'
-                  ? 'Team'
-                  : market === 'spread'
-                  ? 'Spread'
-                  : 'Total'}
-              </div>
+                  {rows.map((row, idx) => {
+                    const best =
+                      market === 'moneyline'
+                        ? bestMoneylineBooks(row)
+                        : market === 'spread'
+                        ? bestSpreadBooks(row)
+                        : bestTotalBooks(row);
 
-              {BOOKS.map((book) => (
-                <div
-                  key={book}
-                  style={{
-                    padding: '12px 10px',
-                    textAlign: 'center',
-                    borderBottom: '1px solid #182235',
-                    color: '#94a3b8',
-                    fontSize: 12,
-                    fontWeight: 700,
-                    textTransform: 'uppercase',
-                    letterSpacing: '0.04em',
-                  }}
-                >
-                  {book}
-                </div>
-              ))}
-
-              {market === 'moneyline' &&
-                event.moneyline.map((row, idx) => {
-                  const best = bestBookForPrice({
-                    Pinnacle: row.Pinnacle,
-                    FanDuel: row.FanDuel,
-                    DraftKings: row.DraftKings,
-                  });
-
-                  return (
-                    <React.Fragment key={`${event.id}-ml-${idx}`}>
-                      <div
-                        style={{
-                          padding: '14px',
-                          borderBottom:
-                            idx === event.moneyline.length - 1 ? 'none' : '1px solid #182235',
-                        }}
-                      >
-                        <div style={{ fontWeight: 700 }}>{row.team}</div>
-                      </div>
-
-                      {BOOKS.map((book) => {
-                        const isBest = best.includes(book);
-                        return (
-                          <div
-                            key={book}
-                            style={{
-                              padding: '14px 10px',
-                              textAlign: 'center',
-                              borderBottom:
-                                idx === event.moneyline.length - 1
-                                  ? 'none'
-                                  : '1px solid #182235',
-                              background: isBest ? 'rgba(34, 197, 94, 0.12)' : 'transparent',
-                              color: isBest ? '#dcfce7' : '#e5e7eb',
-                              fontWeight: 800,
-                            }}
-                          >
-                            {formatAmericanOdds(row[book])}
-                          </div>
-                        );
-                      })}
-                    </React.Fragment>
-                  );
-                })}
-
-              {market === 'spread' &&
-                event.spread.map((row, idx) => {
-                  const best = bestSpreadBooks(row.line, {
-                    Pinnacle: row.Pinnacle,
-                    FanDuel: row.FanDuel,
-                    DraftKings: row.DraftKings,
-                  });
-
-                  return (
-                    <React.Fragment key={`${event.id}-sp-${idx}`}>
-                      <div
-                        style={{
-                          padding: '14px',
-                          borderBottom:
-                            idx === event.spread.length - 1 ? 'none' : '1px solid #182235',
-                        }}
-                      >
-                        <div style={{ fontWeight: 700 }}>{row.team}</div>
-                        <div style={{ color: '#94a3b8', fontSize: 13, marginTop: 4 }}>
-                          {row.line > 0 ? '+' : ''}
-                          {row.line}
-                        </div>
-                      </div>
-
-                      {BOOKS.map((book) => {
-                        const isBest = best.includes(book);
-                        return (
-                          <div
-                            key={book}
-                            style={{
-                              padding: '14px 10px',
-                              textAlign: 'center',
-                              borderBottom:
-                                idx === event.spread.length - 1
-                                  ? 'none'
-                                  : '1px solid #182235',
-                              background: isBest ? 'rgba(34, 197, 94, 0.12)' : 'transparent',
-                              color: isBest ? '#dcfce7' : '#e5e7eb',
-                            }}
-                          >
-                            <div style={{ fontWeight: 700 }}>
-                              {row.line > 0 ? '+' : ''}
-                              {row.line}
-                            </div>
-                            <div style={{ fontSize: 13, color: isBest ? '#bbf7d0' : '#94a3b8' }}>
-                              {formatAmericanOdds(row[book])}
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </React.Fragment>
-                  );
-                })}
-
-              {market === 'total' &&
-                event.total.map((row, idx) => {
-                  const best = bestTotalBooks(row.side, {
-                    Pinnacle: row.Pinnacle,
-                    FanDuel: row.FanDuel,
-                    DraftKings: row.DraftKings,
-                  });
-
-                  return (
-                    <React.Fragment key={`${event.id}-to-${idx}`}>
-                      <div
-                        style={{
-                          padding: '14px',
-                          borderBottom:
-                            idx === event.total.length - 1 ? 'none' : '1px solid #182235',
-                        }}
-                      >
-                        <div style={{ fontWeight: 700 }}>{row.side}</div>
-                        <div style={{ color: '#94a3b8', fontSize: 13, marginTop: 4 }}>
-                          {row.line}
-                        </div>
-                      </div>
-
-                      {BOOKS.map((book) => {
-                        const isBest = best.includes(book);
-                        return (
-                          <div
-                            key={book}
-                            style={{
-                              padding: '14px 10px',
-                              textAlign: 'center',
-                              borderBottom:
-                                idx === event.total.length - 1
-                                  ? 'none'
-                                  : '1px solid #182235',
-                              background: isBest ? 'rgba(34, 197, 94, 0.12)' : 'transparent',
-                              color: isBest ? '#dcfce7' : '#e5e7eb',
-                            }}
-                          >
-                            <div style={{ fontWeight: 700 }}>{row.line}</div>
-                            <div style={{ fontSize: 13, color: isBest ? '#bbf7d0' : '#94a3b8' }}>
-                              {formatAmericanOdds(row[book])}
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </React.Fragment>
-                  );
-                })}
-            </div>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-                }
+                    return (
+                      <React.Fragment key={`${event.id}-${market}-${row.label}-${idx}`}>
+                        <div
+                          style={{
+                            padding: '14px',
+                            borderBottom:
+                              idx === rows.length - 1 ? 'none' : '1px solid #182235',
+                          }}
+                        >
+                          <div style={{ fontWeight: 700 }}>{row.label}</div>
+                          {market !== 'moneyline' && (
+                            <div
+                              style={{
+                                color: '#94a3b8',
+                                fontSize: 13,
+                                marginTop: 4,
+                              }}
+                            >
+                              {market === 'total'
+                                ? typeof row.books.Pinnacle.poi
