@@ -1,10 +1,11 @@
 import React, { useEffect, useMemo, useState } from 'react';
 
+type MainView = 'board' | 'tools';
 type MarketTab = 'moneyline' | 'spread' | 'total';
 type SportKey = 'basketball_nba' | 'icehockey_nhl';
 type BookKey = 'Pinnacle' | 'FanDuel' | 'DraftKings';
 type EdgeType = 'price' | 'point' | 'both' | null;
-type ToolTab = 'odds' | 'hedge';
+type ToolTab = 'odds' | 'hedge' | 'parlay';
 
 type Outcome = {
   name: string;
@@ -96,6 +97,20 @@ function americanToImpliedPct(odds?: number): number {
   }
 
   return ((-odds) / ((-odds) + 100)) * 100;
+}
+
+function americanToDecimal(odds?: number): number {
+  if (typeof odds !== 'number' || odds === 0) return 0;
+  if (odds > 0) return 1 + odds / 100;
+  return 1 + 100 / Math.abs(odds);
+}
+
+function decimalToAmerican(decimalOdds: number): number {
+  if (!Number.isFinite(decimalOdds) || decimalOdds <= 1) return 0;
+  if (decimalOdds >= 2) {
+    return Math.round((decimalOdds - 1) * 100);
+  }
+  return Math.round(-100 / (decimalOdds - 1));
 }
 
 function americanProfit(stake: number, odds: number): number {
@@ -251,14 +266,22 @@ function parseNumberInput(value: string): number {
   return Number.isFinite(n) ? n : 0;
 }
 
+function formatMoney(value: number): string {
+  if (!Number.isFinite(value)) return '$0.00';
+  return new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: 'USD',
+  }).format(value);
+}
+
 export default function App() {
+  const [mainView, setMainView] = useState<MainView>('board');
   const [sport, setSport] = useState<SportKey>('basketball_nba');
   const [market, setMarket] = useState<MarketTab>('moneyline');
   const [games, setGames] = useState<RawGame[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [updated, setUpdated] = useState('');
-
   const [toolTab, setToolTab] = useState<ToolTab>('odds');
 
   const [calcOdds, setCalcOdds] = useState('');
@@ -268,6 +291,13 @@ export default function App() {
   const [hedgeOrigOdds, setHedgeOrigOdds] = useState('');
   const [hedgeHedgeStake, setHedgeHedgeStake] = useState('');
   const [hedgeHedgeOdds, setHedgeHedgeOdds] = useState('');
+
+  const [parlayLeg1, setParlayLeg1] = useState('');
+  const [parlayLeg2, setParlayLeg2] = useState('');
+  const [parlayLeg3, setParlayLeg3] = useState('');
+  const [parlayLeg4, setParlayLeg4] = useState('');
+  const [parlayStake, setParlayStake] = useState('');
+  const [parlayOfferedOdds, setParlayOfferedOdds] = useState('');
 
   async function loadGames() {
     try {
@@ -307,7 +337,7 @@ export default function App() {
     const totalReturn = americanReturn(stake, odds);
     const implied = americanToImpliedPct(odds);
 
-    return { stake, odds, profit, totalReturn, implied };
+    return { profit, totalReturn, implied };
   }, [calcStake, calcOdds]);
 
   const hedgeCalc = useMemo(() => {
@@ -320,32 +350,75 @@ export default function App() {
     const hedgeProfit = americanProfit(hedgeStake, hedgeOdds);
 
     const totalRisk = origStake + hedgeStake;
-
     const netIfOriginalWins = origProfit - hedgeStake;
     const netIfHedgeWins = hedgeProfit - origStake;
 
     let breakEvenHedgeStake = 0;
-    if (Number.isFinite(origStake) && Number.isFinite(origOdds) && Number.isFinite(hedgeOdds)) {
-      const originalWinNet = americanProfit(origStake, origOdds);
-      const hedgeDecimalProfitPerDollar =
-        hedgeOdds > 0 ? hedgeOdds / 100 : 100 / Math.abs(hedgeOdds);
+    const hedgeDecimalProfitPerDollar =
+      hedgeOdds > 0 ? hedgeOdds / 100 : hedgeOdds < 0 ? 100 / Math.abs(hedgeOdds) : 0;
 
-      if (hedgeDecimalProfitPerDollar > 0) {
-        breakEvenHedgeStake = (origStake + originalWinNet) / (1 + hedgeDecimalProfitPerDollar);
-      }
+    if (hedgeDecimalProfitPerDollar > 0) {
+      breakEvenHedgeStake = (origStake + origProfit) / (1 + hedgeDecimalProfitPerDollar);
     }
 
     return {
-      origStake,
-      origOdds,
-      hedgeStake,
-      hedgeOdds,
-      totalRisk,
       netIfOriginalWins,
       netIfHedgeWins,
+      totalRisk,
       breakEvenHedgeStake,
     };
   }, [hedgeOrigStake, hedgeOrigOdds, hedgeHedgeStake, hedgeHedgeOdds]);
+
+  const parlayCalc = useMemo(() => {
+    const legs = [parlayLeg1, parlayLeg2, parlayLeg3, parlayLeg4]
+      .map(parseNumberInput)
+      .filter((n) => n !== 0);
+
+    const stake = parseNumberInput(parlayStake);
+    const offeredOdds = parseNumberInput(parlayOfferedOdds);
+
+    if (legs.length === 0) {
+      return {
+        fairDecimal: 0,
+        fairAmerican: 0,
+        fairImplied: 0,
+        offeredImplied: 0,
+        fairReturn: 0,
+        offeredReturn: 0,
+        dollarHaircut: 0,
+        impliedHaircut: 0,
+      };
+    }
+
+    const fairDecimal = legs.reduce((acc, odds) => acc * americanToDecimal(odds), 1);
+    const fairAmerican = decimalToAmerican(fairDecimal);
+    const fairImplied = fairDecimal > 1 ? (1 / fairDecimal) * 100 : 0;
+    const offeredImplied = americanToImpliedPct(offeredOdds);
+
+    const fairReturn = stake > 0 ? stake * fairDecimal : 0;
+    const offeredReturn = stake > 0 ? americanReturn(stake, offeredOdds) : 0;
+
+    const dollarHaircut = Math.max(0, fairReturn - offeredReturn);
+    const impliedHaircut = Math.max(0, offeredImplied - fairImplied);
+
+    return {
+      fairDecimal,
+      fairAmerican,
+      fairImplied,
+      offeredImplied,
+      fairReturn,
+      offeredReturn,
+      dollarHaircut,
+      impliedHaircut,
+    };
+  }, [
+    parlayLeg1,
+    parlayLeg2,
+    parlayLeg3,
+    parlayLeg4,
+    parlayStake,
+    parlayOfferedOdds,
+  ]);
 
   return (
     <div
@@ -374,714 +447,216 @@ export default function App() {
           </p>
 
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
-            <span style={pillStyle}>Mode: Live</span>
-            <span style={pillStyle}>Updated: {updated || '—'}</span>
-            <button onClick={loadGames} style={refreshButtonStyle} disabled={loading}>
-              {loading ? 'Loading…' : 'Refresh'}
+            <button
+              onClick={() => setMainView('board')}
+              style={buttonStyle(mainView === 'board', '#38bdf8')}
+            >
+              Board
+            </button>
+            <button
+              onClick={() => setMainView('tools')}
+              style={buttonStyle(mainView === 'tools', '#38bdf8')}
+            >
+              Tools
             </button>
           </div>
 
-          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
-            <button
-              onClick={() => setSport('basketball_nba')}
-              style={buttonStyle(sport === 'basketball_nba', '#38bdf8')}
-            >
-              NBA
-            </button>
-            <button
-              onClick={() => setSport('icehockey_nhl')}
-              style={buttonStyle(sport === 'icehockey_nhl', '#38bdf8')}
-            >
-              NHL
-            </button>
-          </div>
+          {mainView === 'board' && (
+            <>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
+                <span style={pillStyle}>Mode: Live</span>
+                <span style={pillStyle}>Updated: {updated || '—'}</span>
+                <button onClick={loadGames} style={refreshButtonStyle} disabled={loading}>
+                  {loading ? 'Loading…' : 'Refresh'}
+                </button>
+              </div>
 
-          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
-            <button
-              onClick={() => setMarket('moneyline')}
-              style={buttonStyle(market === 'moneyline', '#22c55e')}
-            >
-              Moneyline
-            </button>
-            <button
-              onClick={() => setMarket('spread')}
-              style={buttonStyle(market === 'spread', '#22c55e')}
-            >
-              Spread
-            </button>
-            <button
-              onClick={() => setMarket('total')}
-              style={buttonStyle(market === 'total', '#22c55e')}
-            >
-              Total
-            </button>
-          </div>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
+                <button
+                  onClick={() => setSport('basketball_nba')}
+                  style={buttonStyle(sport === 'basketball_nba', '#38bdf8')}
+                >
+                  NBA
+                </button>
+                <button
+                  onClick={() => setSport('icehockey_nhl')}
+                  style={buttonStyle(sport === 'icehockey_nhl', '#38bdf8')}
+                >
+                  NHL
+                </button>
+              </div>
 
-          <div
-            style={{
-              display: 'grid',
-              gap: 6,
-              gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))',
-              alignItems: 'start',
-            }}
-          >
-            <LegendBox
-              title="PRICE EDGE"
-              text="Same number, better juice"
-              edge="price"
-            />
-            <LegendBox
-              title="NUMBER EDGE"
-              text="Better point / total"
-              edge="point"
-            />
-            <LegendBox
-              title="BOTH"
-              text="Better number and price"
-              edge="both"
-            />
-          </div>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
+                <button
+                  onClick={() => setMarket('moneyline')}
+                  style={buttonStyle(market === 'moneyline', '#22c55e')}
+                >
+                  Moneyline
+                </button>
+                <button
+                  onClick={() => setMarket('spread')}
+                  style={buttonStyle(market === 'spread', '#22c55e')}
+                >
+                  Spread
+                </button>
+                <button
+                  onClick={() => setMarket('total')}
+                  style={buttonStyle(market === 'total', '#22c55e')}
+                >
+                  Total
+                </button>
+              </div>
+
+              <div
+                style={{
+                  display: 'grid',
+                  gap: 6,
+                  gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))',
+                  alignItems: 'start',
+                }}
+              >
+                <LegendBox title="PRICE EDGE" text="Same number, better juice" edge="price" />
+                <LegendBox title="NUMBER EDGE" text="Better point / total" edge="point" />
+                <LegendBox title="BOTH" text="Better number and price" edge="both" />
+              </div>
+            </>
+          )}
+
+          {mainView === 'tools' && (
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              <button
+                onClick={() => setToolTab('odds')}
+                style={buttonStyle(toolTab === 'odds', '#22c55e')}
+              >
+                Odds
+              </button>
+              <button
+                onClick={() => setToolTab('hedge')}
+                style={buttonStyle(toolTab === 'hedge', '#22c55e')}
+              >
+                Hedge
+              </button>
+              <button
+                onClick={() => setToolTab('parlay')}
+                style={buttonStyle(toolTab === 'parlay', '#22c55e')}
+              >
+                Parlay Haircut
+              </button>
+            </div>
+          )}
         </div>
       </div>
 
       <div style={{ maxWidth: 980, margin: '0 auto', padding: 16, display: 'grid', gap: 16 }}>
-        {loading && <Box>Loading live odds…</Box>}
-        {!loading && error && <Box>Error: {error}</Box>}
-        {!loading && !error && games.length === 0 && <Box>No games returned.</Box>}
+        {mainView === 'board' && (
+          <>
+            {loading && <Box>Loading live odds…</Box>}
+            {!loading && error && <Box>Error: {error}</Box>}
+            {!loading && !error && games.length === 0 && <Box>No games returned.</Box>}
 
-        {!loading &&
-          !error &&
-          games.map((game) => {
-            const h2hRows = buildMoneylineRows(game);
-            const spreadRows = buildSpreadRows(game);
-            const totalRows = buildTotalRows(game);
+            {!loading &&
+              !error &&
+              games.map((game) => {
+                const h2hRows = buildMoneylineRows(game);
+                const spreadRows = buildSpreadRows(game);
+                const totalRows = buildTotalRows(game);
 
-            const rows =
-              market === 'moneyline'
-                ? h2hRows
-                : market === 'spread'
-                ? spreadRows
-                : totalRows;
+                const rows =
+                  market === 'moneyline'
+                    ? h2hRows
+                    : market === 'spread'
+                    ? spreadRows
+                    : totalRows;
 
-            return (
-              <div
-                key={game.id}
-                style={{
-                  background: 'rgba(15, 23, 42, 0.92)',
-                  border: '1px solid #1f2937',
-                  borderRadius: 20,
-                  overflow: 'hidden',
-                }}
-              >
-                <div style={{ padding: 16, borderBottom: '1px solid #182235' }}>
-                  <div style={{ color: '#38bdf8', fontSize: 12, fontWeight: 700, marginBottom: 6 }}>
-                    {game.sport_title}
-                  </div>
-                  <div style={{ fontSize: 28, fontWeight: 800 }}>
-                    {game.away_team} vs {game.home_team}
-                  </div>
-                  <div style={{ marginTop: 8, color: '#94a3b8', fontWeight: 700 }}>
-                    {statusText(game.commence_time)}
-                  </div>
-                </div>
-
-                <div
-                  style={{
-                    padding: '0 16px 8px',
-                    fontSize: 12,
-                    color: '#94a3b8',
-                  }}
-                >
-                  Swipe sideways to view all books
-                </div>
-
-                <div
-                  style={{
-                    overflowX: 'auto',
-                    WebkitOverflowScrolling: 'touch',
-                  }}
-                >
+                return (
                   <div
+                    key={game.id}
                     style={{
-                      display: 'grid',
-                      gridTemplateColumns:
-                        'minmax(160px, 1.4fr) repeat(3, minmax(140px, 1fr))',
-                      minWidth: 620,
+                      background: 'rgba(15, 23, 42, 0.92)',
+                      border: '1px solid #1f2937',
+                      borderRadius: 20,
+                      overflow: 'hidden',
                     }}
                   >
-                    <CellHeader>
-                      {market === 'moneyline'
-                        ? 'Team'
-                        : market === 'spread'
-                        ? 'Spread'
-                        : 'Total'}
-                    </CellHeader>
-                    {BOOKS.map((book) => (
-                      <CellHeader key={book}>{book}</CellHeader>
-                    ))}
+                    <div style={{ padding: 16, borderBottom: '1px solid #182235' }}>
+                      <div
+                        style={{
+                          color: '#38bdf8',
+                          fontSize: 12,
+                          fontWeight: 700,
+                          marginBottom: 6,
+                        }}
+                      >
+                        {game.sport_title}
+                      </div>
+                      <div style={{ fontSize: 28, fontWeight: 800 }}>
+                        {game.away_team} vs {game.home_team}
+                      </div>
+                      <div style={{ marginTop: 8, color: '#94a3b8', fontWeight: 700 }}>
+                        {statusText(game.commence_time)}
+                      </div>
+                    </div>
 
-                    {rows.map((row, idx) => {
-                      const best = getBestPrice(row.prices);
+                    <div
+                      style={{
+                        padding: '0 16px 8px',
+                        fontSize: 12,
+                        color: '#94a3b8',
+                      }}
+                    >
+                      Swipe sideways to view all books
+                    </div>
 
-                      return (
-                        <React.Fragment key={`${game.id}-${row.label}-${idx}`}>
-                          <div style={leftCellStyle(idx === rows.length - 1)}>
-                            <div style={{ fontWeight: 700 }}>{row.label}</div>
-                            {market !== 'moneyline' && (
-                              <div style={{ fontSize: 13, color: '#94a3b8', marginTop: 4 }}>
-                                {row.displayPoint}
-                              </div>
-                            )}
-                          </div>
+                    <div
+                      style={{
+                        overflowX: 'auto',
+                        WebkitOverflowScrolling: 'touch',
+                      }}
+                    >
+                      <div
+                        style={{
+                          display: 'grid',
+                          gridTemplateColumns:
+                            'minmax(160px, 1.4fr) repeat(3, minmax(140px, 1fr))',
+                          minWidth: 620,
+                        }}
+                      >
+                        <CellHeader>
+                          {market === 'moneyline'
+                            ? 'Team'
+                            : market === 'spread'
+                            ? 'Spread'
+                            : 'Total'}
+                        </CellHeader>
+                        {BOOKS.map((book) => (
+                          <CellHeader key={book}>{book}</CellHeader>
+                        ))}
 
-                          {BOOKS.map((book) => {
-                            const isBest = best.includes(book);
-                            const edge = getEdgeInfo(market, row, book);
+                        {rows.map((row, idx) => {
+                          const best = getBestPrice(row.prices);
 
-                            return (
-                              <div
-                                key={book}
-                                style={valueCellStyle(idx === rows.length - 1, isBest)}
-                              >
-                                {market === 'moneyline' ? (
-                                  <div style={{ fontWeight: 800, fontSize: 17 }}>
-                                    {formatOdds(row.prices[book])}
-                                  </div>
-                                ) : (
-                                  <>
-                                    <div style={{ fontWeight: 800, fontSize: 17 }}>
-                                      {row.points[book] ?? '—'}
-                                    </div>
-                                    <div
-                                      style={{
-                                        fontSize: 13,
-                                        color: isBest ? '#bbf7d0' : '#94a3b8',
-                                        marginTop: 2,
-                                      }}
-                                    >
-                                      {formatOdds(row.prices[book])}
-                                    </div>
-                                  </>
-                                )}
-
-                                {book !== 'Pinnacle' && edge.type && (
+                          return (
+                            <React.Fragment key={`${game.id}-${row.label}-${idx}`}>
+                              <div style={leftCellStyle(idx === rows.length - 1)}>
+                                <div style={{ fontWeight: 700 }}>{row.label}</div>
+                                {market !== 'moneyline' && (
                                   <div
                                     style={{
-                                      marginTop: 8,
-                                      borderRadius: 12,
-                                      padding: '6px 6px',
-                                      textAlign: 'center',
-                                      ...edgeBoxStyle(edge.type),
+                                      fontSize: 13,
+                                      color: '#94a3b8',
+                                      marginTop: 4,
                                     }}
                                   >
-                                    <div
-                                      style={{
-                                        fontSize: 10,
-                                        fontWeight: 800,
-                                        letterSpacing: '0.04em',
-                                      }}
-                                    >
-                                      EDGE
-                                    </div>
-                                    <div
-                                      style={{
-                                        fontSize: 14,
-                                        fontWeight: 900,
-                                        marginTop: 2,
-                                      }}
-                                    >
-                                      {edge.pct.toFixed(1)}%
-                                    </div>
-                                    <div
-                                      style={{
-                                        fontSize: 10,
-                                        marginTop: 2,
-                                        opacity: 0.95,
-                                      }}
-                                    >
-                                      {edge.reason}
-                                    </div>
+                                    {row.displayPoint}
                                   </div>
                                 )}
                               </div>
-                            );
-                          })}
-                        </React.Fragment>
-                      );
-                    })}
-                  </div>
-                </div>
-              </div>
-            );
-          })}
 
-        <div
-          style={{
-            background: 'rgba(15, 23, 42, 0.92)',
-            border: '1px solid #1f2937',
-            borderRadius: 20,
-            overflow: 'hidden',
-          }}
-        >
-          <div style={{ padding: 16, borderBottom: '1px solid #182235' }}>
-            <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: '0.06em', color: '#38bdf8' }}>
-              TOOLS
-            </div>
-            <div style={{ fontSize: 28, fontWeight: 800, marginTop: 4 }}>
-              Betting Calculators
-            </div>
-            <div style={{ marginTop: 8, color: '#94a3b8' }}>
-              Local math only. No extra API requests.
-            </div>
-          </div>
+                              {BOOKS.map((book) => {
+                                const isBest = best.includes(book);
+                                const edge = getEdgeInfo(market, row, book);
 
-          <div style={{ padding: 16 }}>
-            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 16 }}>
-  <button
-    onClick={() => setToolTab('odds')}
-    style={buttonStyle(toolTab === 'odds', '#22c55e')}
-  >
-    Odds Calculator
-  </button>
-  <button
-    onClick={() => setToolTab('hedge')}
-    style={buttonStyle(toolTab === 'hedge', '#22c55e')}
-  >
-    Hedge Calculator
-  </button>
-</div>
-
-{toolTab === 'odds' && (
-  <div style={{ display: 'grid', gap: 16 }}>
-    <div style={toolGridStyle}>
-      <InputCard
-        label="American Odds"
-        value={calcOdds}
-        onChange={setCalcOdds}
-        placeholder="-110 or +150"
-      />
-      <InputCard
-        label="Stake"
-        value={calcStake}
-        onChange={setCalcStake}
-        placeholder="10"
-      />
-    </div>
-
-    <div style={toolGridStyle}>
-      <StatCard
-        title="Profit"
-        value={formatMoney(oddsCalc.profit)}
-      />
-      <StatCard
-        title="Total Return"
-        value={formatMoney(oddsCalc.totalReturn)}
-      />
-      <StatCard
-        title="Implied Probability"
-        value={`${oddsCalc.implied.toFixed(2)}%`}
-      />
-    </div>
-  </div>
-)}
-
-{toolTab === 'hedge' && (
-  <div style={{ display: 'grid', gap: 16 }}>
-    <div style={toolGridStyle}>
-      <InputCard
-        label="Original Stake"
-        value={hedgeOrigStake}
-        onChange={setHedgeOrigStake}
-        placeholder="10"
-      />
-      <InputCard
-        label="Original Odds"
-        value={hedgeOrigOdds}
-        onChange={setHedgeOrigOdds}
-        placeholder="+180"
-      />
-      <InputCard
-        label="Hedge Stake"
-        value={hedgeHedgeStake}
-        onChange={setHedgeHedgeStake}
-        placeholder="8"
-      />
-      <InputCard
-        label="Hedge Odds"
-        value={hedgeHedgeOdds}
-        onChange={setHedgeHedgeOdds}
-        placeholder="-125"
-      />
-    </div>
-
-    <div style={toolGridStyle}>
-      <StatCard
-        title="Net if Original Wins"
-        value={formatMoney(hedgeCalc.netIfOriginalWins)}
-      />
-      <StatCard
-        title="Net if Hedge Wins"
-        value={formatMoney(hedgeCalc.netIfHedgeWins)}
-      />
-      <StatCard
-        title="Total Risked"
-        value={formatMoney(hedgeCalc.totalRisk)}
-      />
-      <StatCard
-        title="Break-Even Hedge Stake"
-        value={formatMoney(hedgeCalc.breakEvenHedgeStake)}
-      />
-    </div>
-  </div>
-)}
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function buildMoneylineRows(game: RawGame): RowData[] {
-  const rows: RowData[] = [];
-  const labels = [game.away_team, game.home_team];
-
-  for (const label of labels) {
-    const prices: Partial<Record<BookKey, number>> = {};
-    const points: Partial<Record<BookKey, string>> = {};
-    const pointNums: Partial<Record<BookKey, number>> = {};
-
-    for (const bookmaker of game.bookmakers || []) {
-      const book = toBookKey(bookmaker);
-      if (!book) continue;
-
-      const market = bookmaker.markets?.find((m) => m.key === 'h2h');
-      const outcome = market?.outcomes?.find((o) => o.name === label);
-
-      if (outcome) {
-        prices[book] = outcome.price;
-      }
-    }
-
-    rows.push({
-      label,
-      displayPoint: '',
-      prices,
-      points,
-      pointNums,
-    });
-  }
-
-  return rows;
-}
-
-function buildSpreadRows(game: RawGame): RowData[] {
-  const rows: RowData[] = [];
-  const labels = [game.away_team, game.home_team];
-
-  for (const label of labels) {
-    const prices: Partial<Record<BookKey, number>> = {};
-    const points: Partial<Record<BookKey, string>> = {};
-    const pointNums: Partial<Record<BookKey, number>> = {};
-    let displayPoint = '—';
-
-    for (const bookmaker of game.bookmakers || []) {
-      const book = toBookKey(bookmaker);
-      if (!book) continue;
-
-      const market = bookmaker.markets?.find((m) => m.key === 'spreads');
-      const outcome = market?.outcomes?.find((o) => o.name === label);
-
-      if (outcome) {
-        prices[book] = outcome.price;
-        points[book] = formatPoint(outcome.point);
-        if (typeof outcome.point === 'number') {
-          pointNums[book] = outcome.point;
-        }
-        if (displayPoint === '—') displayPoint = formatPoint(outcome.point);
-      }
-    }
-
-    rows.push({
-      label,
-      displayPoint,
-      prices,
-      points,
-      pointNums,
-    });
-  }
-
-  return rows;
-}
-
-function buildTotalRows(game: RawGame): RowData[] {
-  const rows: RowData[] = [];
-  const labels = ['Over', 'Under'];
-
-  for (const label of labels) {
-    const prices: Partial<Record<BookKey, number>> = {};
-    const points: Partial<Record<BookKey, string>> = {};
-    const pointNums: Partial<Record<BookKey, number>> = {};
-    let displayPoint = '—';
-
-    for (const bookmaker of game.bookmakers || []) {
-      const book = toBookKey(bookmaker);
-      if (!book) continue;
-
-      const market = bookmaker.markets?.find((m) => m.key === 'totals');
-      const outcome = market?.outcomes?.find((o) => o.name === label);
-
-      if (outcome) {
-        prices[book] = outcome.price;
-        points[book] = typeof outcome.point === 'number' ? `${outcome.point}` : '—';
-        if (typeof outcome.point === 'number') {
-          pointNums[book] = outcome.point;
-          if (displayPoint === '—') {
-            displayPoint = `${outcome.point}`;
-          }
-        }
-      }
-    }
-
-    rows.push({
-      label,
-      displayPoint,
-      prices,
-      points,
-      pointNums,
-    });
-  }
-
-  return rows;
-}
-
-function Box({ children }: { children: React.ReactNode }) {
-  return (
-    <div
-      style={{
-        background: 'rgba(15, 23, 42, 0.92)',
-        border: '1px solid #1f2937',
-        borderRadius: 20,
-        padding: 20,
-        color: '#cbd5e1',
-      }}
-    >
-      {children}
-    </div>
-  );
-}
-
-function LegendBox({
-  title,
-  text,
-  edge,
-}: {
-  title: string;
-  text: string;
-  edge: EdgeType;
-}) {
-  return (
-    <div
-      style={{
-        borderRadius: 12,
-        padding: '8px 10px',
-        minHeight: 0,
-        ...edgeBoxStyle(edge),
-      }}
-    >
-      <div
-        style={{
-          fontSize: 10,
-          fontWeight: 900,
-          letterSpacing: '0.05em',
-          lineHeight: 1.1,
-        }}
-      >
-        {title}
-      </div>
-      <div
-        style={{
-          fontSize: 11,
-          marginTop: 4,
-          lineHeight: 1.25,
-        }}
-      >
-        {text}
-      </div>
-    </div>
-  );
-}
-
-function CellHeader({ children }: { children: React.ReactNode }) {
-  return (
-    <div
-      style={{
-        padding: '12px 10px',
-        textAlign: 'center',
-        borderBottom: '1px solid #182235',
-        color: '#94a3b8',
-        fontSize: 12,
-        fontWeight: 700,
-        textTransform: 'uppercase',
-      }}
-    >
-      {children}
-    </div>
-  );
-}
-
-function InputCard({
-  label,
-  value,
-  onChange,
-  placeholder,
-}: {
-  label: string;
-  value: string;
-  onChange: (v: string) => void;
-  placeholder: string;
-}) {
-  return (
-    <div
-      style={{
-        background: 'rgba(10, 18, 32, 0.85)',
-        border: '1px solid #243041',
-        borderRadius: 16,
-        padding: 14,
-      }}
-    >
-      <div
-        style={{
-          fontSize: 12,
-          color: '#94a3b8',
-          fontWeight: 700,
-          marginBottom: 8,
-          textTransform: 'uppercase',
-        }}
-      >
-        {label}
-      </div>
-      <input
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        placeholder={placeholder}
-        inputMode="decimal"
-        style={{
-          width: '100%',
-          background: '#0b1220',
-          color: '#e5e7eb',
-          border: '1px solid #334155',
-          borderRadius: 12,
-          padding: '12px 14px',
-          fontSize: 16,
-          boxSizing: 'border-box',
-        }}
-      />
-    </div>
-  );
-}
-
-function StatCard({
-  title,
-  value,
-}: {
-  title: string;
-  value: string;
-}) {
-  return (
-    <div
-      style={{
-        background: 'rgba(10, 18, 32, 0.85)',
-        border: '1px solid #243041',
-        borderRadius: 16,
-        padding: 14,
-      }}
-    >
-      <div
-        style={{
-          fontSize: 12,
-          color: '#94a3b8',
-          fontWeight: 700,
-          marginBottom: 8,
-          textTransform: 'uppercase',
-        }}
-      >
-        {title}
-      </div>
-      <div
-        style={{
-          fontSize: 24,
-          fontWeight: 800,
-          color: '#f8fafc',
-        }}
-      >
-        {value}
-      </div>
-    </div>
-  );
-}
-
-function formatMoney(value: number): string {
-  if (!Number.isFinite(value)) return '$0.00';
-  return new Intl.NumberFormat('en-US', {
-    style: 'currency',
-    currency: 'USD',
-  }).format(value);
-}
-
-const toolGridStyle: React.CSSProperties = {
-  display: 'grid',
-  gap: 12,
-  gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
-};
-
-const pillStyle: React.CSSProperties = {
-  display: 'inline-block',
-  padding: '6px 10px',
-  borderRadius: 999,
-  border: '1px solid #243041',
-  background: '#111827',
-  color: '#cbd5e1',
-  fontSize: 12,
-  fontWeight: 700,
-};
-
-const refreshButtonStyle: React.CSSProperties = {
-  padding: '6px 12px',
-  borderRadius: 999,
-  border: '1px solid #22c55e',
-  background: 'rgba(34, 197, 94, 0.12)',
-  color: '#dcfce7',
-  fontSize: 12,
-  fontWeight: 700,
-  cursor: 'pointer',
-};
-
-function buttonStyle(active: boolean, color: string): React.CSSProperties {
-  return {
-    border: active ? `1px solid ${color}` : '1px solid #243041',
-    background: active ? `${color}22` : '#111827',
-    color: active ? '#ffffff' : '#cbd5e1',
-    padding: '10px 14px',
-    borderRadius: 12,
-    fontSize: 14,
-    fontWeight: 700,
-    cursor: 'pointer',
-  };
-}
-
-function leftCellStyle(last: boolean): React.CSSProperties {
-  return {
-    padding: 14,
-    borderBottom: last ? 'none' : '1px solid #182235',
-  };
-}
-
-function valueCellStyle(last: boolean, best: boolean): React.CSSProperties {
-  return {
-    padding: '14px 10px',
-    textAlign: 'center',
-    borderBottom: last ? 'none' : '1px solid #182235',
-    background: best ? 'rgba(34, 197, 94, 0.10)' : 'transparent',
-    color: best ? '#dcfce7' : '#e5e7eb',
-  };
-      }
+                                return (
+                                  <div
+                                    key={book}
+                                    sty
