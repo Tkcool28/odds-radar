@@ -650,7 +650,7 @@ export default function App() {
                                     {row.displayPoint}
                                   </div>
                                 )}
-                              </div>
+                                </div>
 
                               {BOOKS.map((book) => {
                                 const isBest = best.includes(book);
@@ -658,76 +658,82 @@ export default function App() {
 
                                 return (
                                   <div
-                              key={book}
-                              style={valueCellStyle(idx === rows.length - 1, isBest)}
-                            >
-                              {market === 'moneyline' ? (
-                                <div style={{ fontWeight: 800, fontSize: 17 }}>
-                                  {formatOdds(row.prices[book])}
-                                </div>
-                              ) : (
-                                <>
-                                  <div style={{ fontWeight: 800, fontSize: 17 }}>
-                                    {row.points[book] ?? '—'}
-                                  </div>
-                                  <div
-                                    style={{
-                                      fontSize: 13,
-                                      color: isBest ? '#bbf7d0' : '#94a3b8',
-                                      marginTop: 2,
-                                    }}
+                                    key={book}
+                                    style={valueCellStyle(idx === rows.length - 1, isBest)}
                                   >
-                                    {formatOdds(row.prices[book])}
-                                  </div>
-                                </>
-                              )}
+                                    {market === 'moneyline' ? (
+                                      <div style={{ fontWeight: 800, fontSize: 17 }}>
+                                        {formatOdds(row.prices[book])}
+                                      </div>
+                                    ) : (
+                                      <>
+                                        <div style={{ fontWeight: 800, fontSize: 17 }}>
+                                          {row.points[book] ?? '—'}
+                                        </div>
+                                        <div
+                                          style={{
+                                            fontSize: 13,
+                                            color: isBest ? '#bbf7d0' : '#94a3b8',
+                                            marginTop: 2,
+                                          }}
+                                        >
+                                          {formatOdds(row.prices[book])}
+                                        </div>
+                                      </>
+                                    )}
 
-                              {book !== 'Pinnacle' && edge.type && (
-                                <div
-                                  style={{
-                                    marginTop: 8,
-                                    borderRadius: 12,
-                                    padding: '6px 6px',
-                                    textAlign: 'center',
-                                    ...edgeBoxStyle(edge.type),
-                                  }}
-                                >
-                                  <div
-                                    style={{
-                                      fontSize: 10,
-                                      fontWeight: 800,
-                                      letterSpacing: '0.04em',
-                                    }}
-                                  >
-                                    EDGE
+                                    {book !== 'Pinnacle' && edge.type && (
+                                      <div
+                                        style={{
+                                          marginTop: 8,
+                                          borderRadius: 12,
+                                          padding: '6px 6px',
+                                          textAlign: 'center',
+                                          ...edgeBoxStyle(edge.type),
+                                        }}
+                                      >
+                                        <div
+                                          style={{
+                                            fontSize: 10,
+                                            fontWeight: 800,
+                                            letterSpacing: '0.04em',
+                                          }}
+                                        >
+                                          EDGE
+                                        </div>
+                                        <div
+                                          style={{
+                                            fontSize: 14,
+                                            fontWeight: 900,
+                                            marginTop: 2,
+                                          }}
+                                        >
+                                          {edge.pct.toFixed(1)}%
+                                        </div>
+                                        <div
+                                          style={{
+                                            fontSize: 10,
+                                            marginTop: 2,
+                                            opacity: 0.95,
+                                          }}
+                                        >
+                                          {edge.reason}
+                                        </div>
+                                      </div>
+                                    )}
                                   </div>
-                                  <div
-                                    style={{
-                                      fontSize: 14,
-                                      fontWeight: 900,
-                                      marginTop: 2,
-                                    }}
-                                  >
-                                    {edge.pct.toFixed(1)}%
-                                  </div>
-                                  <div
-                                    style={{
-                                      fontSize: 10,
-                                      marginTop: 2,
-                                      opacity: 0.95,
-                                    }}
-                                  >
-                                    {edge.reason}
-                                  </div>
-                                </div>
-                              </React.Fragment>
-                    );
-                  })}
-                </div>
-              </div>
-            </div>
-          );
-        })}
+                                );
+                              })}
+                            </React.Fragment>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+          </>
+        )}
 
         {mainView === 'tools' && (
           <div
@@ -1255,4 +1261,4 @@ function valueCellStyle(last: boolean, best: boolean): React.CSSProperties {
     background: best ? 'rgba(34, 197, 94, 0.10)' : 'transparent',
     color: best ? '#dcfce7' : '#e5e7eb',
   };
-                      }
+                                }
