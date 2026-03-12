@@ -720,18 +720,14 @@ export default function App() {
                                     {edge.reason}
                                   </div>
                                 </div>
-                              )}
-                            </div>
-                          );
-                        })}
-                      );
+                              </React.Fragment>
+                    );
                   })}
                 </div>
               </div>
             </div>
-          </div>
-        );
-      })}
+          );
+        })}
 
         {mainView === 'tools' && (
           <div
