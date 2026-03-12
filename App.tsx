@@ -724,14 +724,14 @@ export default function App() {
                             </div>
                           );
                         })}
-                      </React.Fragment>
-                    );
+                      );
                   })}
                 </div>
               </div>
             </div>
           </div>
-        ))}
+        );
+      })}
 
         {mainView === 'tools' && (
           <div
